@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LoyaltyLoop AI — Customer Loyalty Program Designer</title>
+  <meta name="description" content="Design a profitable customer loyalty program for your local business. Free, local-first, no signup.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="app-header no-print">
+  <div class="logo" aria-hidden="true">🔁</div>
+  <div>
+    <h1>LoyaltyLoop AI</h1>
+    <p>Design a loyalty program your customers will actually use. Free, local-first — your data never leaves this browser.</p>
+  </div>
+</header>
+
+<nav class="tab-bar no-print" aria-label="Sections">
+  <button class="tab-btn active" data-tab="recommend" type="button">🎯 Program recommender</button>
+  <button class="tab-btn" data-tab="economics" type="button">💰 Reward economics</button>
+  <button class="tab-btn" data-tab="print" type="button">🖨️ Punch card &amp; signup sheet</button>
+  <button class="tab-btn" data-tab="members" type="button">👥 Member tracker</button>
+</nav>
+
+<main>
+  <!-- 1. Recommender -->
+  <section id="section-recommend" class="tab-section active" aria-label="Program recommender">
+    <div class="card">
+      <h2>What kind of loyalty program fits your business?</h2>
+      <p class="lead">Pick your business type and we'll recommend a program structure with earn &amp; redeem rules.</p>
+      <label class="field">Business type
+        <select id="biz-type"></select>
+      </label>
+      <button id="rec-btn" class="btn no-print" type="button">Recommend my program</button>
+      <div id="rec-result"></div>
+    </div>
+  </section>
+
+  <!-- 2. Economics calculator -->
+  <section id="section-economics" class="tab-section" aria-label="Reward economics calculator">
+    <div class="card">
+      <h2>Will your rewards actually pay for themselves?</h2>
+      <p class="lead">Enter your numbers. We compute the monthly reward cost per member, the extra profit from increased visits, the net benefit, and the break-even visit lift.</p>
+      <div class="grid-2">
+        <label class="field">Average ticket ($)
+          <input id="ec-ticket" type="number" min="0" step="0.01" inputmode="decimal">
+        </label>
+        <label class="field">Visits / month per member
+          <input id="ec-visits" type="number" min="0" step="0.5" inputmode="decimal">
+        </label>
+        <label class="field">Gross margin (%)
+          <input id="ec-margin" type="number" min="0" max="100" step="1" inputmode="decimal">
+        </label>
+        <label class="field">Reward cost ($)
+          <small>What the free reward costs you (not its menu price).</small>
+          <input id="ec-cost" type="number" min="0" step="0.01" inputmode="decimal">
+        </label>
+        <label class="field">Reward every N visits
+          <input id="ec-everyn" type="number" min="1" step="1" inputmode="numeric">
+        </label>
+        <label class="field">Expected visit lift (%)
+          <small>How many more visits you expect members to make.</small>
+          <input id="ec-lift" type="number" min="0" step="1" inputmode="decimal">
+        </label>
+      </div>
+      <button id="ec-btn" class="btn no-print" type="button">Calculate economics</button>
+      <div id="ec-result"></div>
+    </div>
+  </section>
+
+  <!-- 3. Printable punch card + signup sheet -->
+  <section id="section-print" class="tab-section" aria-label="Printable punch card and signup sheet">
+    <div class="card">
+      <h2>Print your punch cards &amp; signup sheet</h2>
+      <p class="lead">Type your business name, set the card size, and print. The printout hides all app chrome — just the card and the sheet.</p>
+      <div class="no-print">
+        <div class="grid-2">
+          <label class="field">Business name
+            <input id="pc-name" type="text" placeholder="e.g. Sunny Side Café" maxlength="60">
+          </label>
+          <label class="field">Reward for a full card
+            <input id="pc-reward" type="text" placeholder="e.g. Free drink" maxlength="60">
+          </label>
+          <label class="field">Punches per card
+            <input id="pc-punches" type="number" min="1" max="25" step="1" inputmode="numeric">
+          </label>
+        </div>
+        <button id="pc-btn" class="btn secondary" type="button">Preview</button>
+        <button id="pc-print" class="btn" type="button">🖨️ Print card &amp; signup sheet</button>
+      </div>
+      <div id="print-area" class="print-sheet"></div>
+    </div>
+  </section>
+
+  <!-- 4. Member tracker -->
+  <section id="section-members" class="tab-section" aria-label="Member tracker">
+    <div class="card">
+      <h2>Track members &amp; visits</h2>
+      <p class="lead">Stamp visits with one click. Rewards are counted automatically. Everything is saved in this browser (localStorage) — nothing is uploaded.</p>
+      <div class="grid-2 no-print">
+        <label class="field">Member name
+          <input id="member-name" type="text" placeholder="e.g. Maria Lopez" maxlength="80">
+        </label>
+        <label class="field">Punches per reward card
+          <input id="member-punches" type="number" min="1" max="25" step="1" value="10" inputmode="numeric">
+        </label>
+      </div>
+      <button id="member-add-btn" class="btn no-print" type="button">Add member</button>
+      <h3>Members</h3>
+      <div id="member-list"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="no-print" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a2332;color:#fff;padding:12px 22px;border-radius:999px;font-size:15px;box-shadow:0 4px 18px rgba(0,0,0,.25);z-index:50;"></div>
+
+<footer class="app-footer no-print">
+  LoyaltyLoop AI · 100% free · local-first · zero API keys · no tracking
+</footer>
+
+<script src="js/logic.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
