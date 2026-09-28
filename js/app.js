@@ -36,7 +36,7 @@
   function renderRecommender() {
     var type = $('biz-type').value;
     var rec = recommendProgram(type);
-    var html = '<div class="result card" style="box-shadow:none">';
+    var html = '<div class="result stamp-result"><span class="stamp-seal">Recommended<br>for you</span>';
     html += '<span class="rec-badge">' + esc(rec.structureName) + '</span>';
     if (rec.fallback) {
       html += '<p><em>Heads up:</em> we didn\'t recognize that business type, so here\'s our safe default.</p>';
@@ -94,6 +94,7 @@
       '<div class="punch-card">' +
         '<h3>' + esc(spec.businessName) + '</h3>' +
         '<div class="reward-line">Loyalty Card — ' + esc(spec.rewardLabel) + '</div>' +
+        '<hr class="punch-divider">' +
         '<div class="punch-grid">' + cells + '</div>' +
         '<div class="member-line"></div>' +
         '<div class="member-line-label">Member name</div>' +
@@ -127,9 +128,23 @@
     return null;
   }
 
+  function stampStrip(m) {
+    // tiny punch-card: filled circles = punches on the member's current card
+    var per = Math.max(1, m.punchesPerCard || 10);
+    var filled = m.visits % per;
+    var cells = '';
+    for (var i = 0; i < per; i++) {
+      cells += '<span class="punch-mini' + (i < filled ? ' filled' : '') + '"></span>';
+    }
+    return '<span class="stamp-mini-card" aria-label="' + filled + ' of ' + per + ' punches">' +
+      cells + '<span class="punch-frac">' + filled + '/' + per + '</span></span>';
+  }
+
   function renderMembers() {
     var list = loadMembers();
     var box = $('member-list');
+    var count = $('member-count');
+    if (count) count.textContent = list.length ? String(list.length) : '';
     if (!list.length) {
       box.innerHTML = '<p class="empty-note">No members yet — add your first member above.</p>';
       return;
@@ -138,8 +153,8 @@
       var earned = rewardsEarned(m);
       return '<div class="member-row" data-id="' + esc(m.id) + '">' +
         '<span class="member-name">' + esc(m.name) + '</span>' +
+        stampStrip(m) +
         '<span class="member-stats">' + m.visits + ' visit' + (m.visits === 1 ? '' : 's') +
-        ' &middot; ' + m.punchesPerCard + ' punches/card' +
         (earned ? ' &middot; <span class="reward-pill">' + earned + ' reward' + (earned === 1 ? '' : 's') + ' earned</span>' : '') +
         '</span>' +
         '<button class="btn small visit-btn" type="button">+1 visit</button>' +
@@ -157,7 +172,7 @@
         saveMembers(list2);
         renderMembers();
         if (res.rewardEarnedNow) {
-          showToast(m.name + ' just earned a reward! 🎉');
+          showToast(m.name + ' just earned a reward');
         }
       });
     });
