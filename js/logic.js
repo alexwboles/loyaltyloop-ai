@@ -367,6 +367,8 @@ function createMember(name, opts) {
     name: clean,
     visits: 0,
     punchesPerCard: punchesPerCard,
+    redeemed: 0,       // rewards the member has cashed in
+    lastVisitAt: null, // ISO string of the most recent logged visit
     joinedAt: new Date().toISOString()
   };
 }
@@ -377,20 +379,92 @@ function rewardsEarned(member) {
   return Math.floor(member.visits / member.punchesPerCard);
 }
 
-/* Log one visit. Mutates + returns the member, and whether a reward was earned. */
-function logVisit(member) {
+/* Rewards earned but not yet redeemed (never negative; tolerates old records). */
+function rewardsAvailable(member) {
+  const earned = rewardsEarned(member);
+  const redeemed = member && Number.isFinite(Number(member.redeemed)) ? Number(member.redeemed) : 0;
+  return Math.max(0, earned - redeemed);
+}
+
+/* Cash in one reward. Mutates the member. Throws when none are available. */
+function redeemReward(member) {
+  if (!member || typeof member.visits !== 'number') {
+    throw new Error('redeemReward: invalid member object');
+  }
+  if (rewardsAvailable(member) < 1) {
+    throw new Error('redeemReward: no rewards available to redeem');
+  }
+  member.redeemed = (Number.isFinite(Number(member.redeemed)) ? Number(member.redeemed) : 0) + 1;
+  return {
+    member: member,
+    redeemed: member.redeemed,
+    rewardsAvailable: rewardsAvailable(member)
+  };
+}
+
+/* Log one visit. Mutates + returns the member, and whether a reward was earned.
+ * atISO is the visit timestamp (ISO string); defaults to now. */
+function logVisit(member, atISO) {
   if (!member || typeof member.visits !== 'number') {
     throw new Error('logVisit: invalid member object');
   }
   const before = rewardsEarned(member);
   member.visits += 1;
+  member.lastVisitAt = atISO || new Date().toISOString();
   const after = rewardsEarned(member);
   return {
     member: member,
     visits: member.visits,
+    lastVisitAt: member.lastVisitAt,
     rewardEarnedNow: after > before,
     rewardsEarned: after
   };
+}
+
+/* Case-insensitive substring search over member names. Empty q returns all. */
+function searchMembers(list, q) {
+  const query = String(q == null ? '' : q).trim().toLowerCase();
+  if (!query) return (list || []).slice();
+  return (list || []).filter(function (m) {
+    return String(m.name || '').toLowerCase().indexOf(query) !== -1;
+  });
+}
+
+/* Sort a member list without mutating it.
+ * key: 'name' (A–Z) | 'visits' (most visits first) | 'newest' (joined last first). */
+function sortMembers(list, key) {
+  const arr = (list || []).slice();
+  if (key === 'name') {
+    arr.sort(function (a, b) {
+      return String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase());
+    });
+  } else if (key === 'visits') {
+    arr.sort(function (a, b) { return (b.visits || 0) - (a.visits || 0); });
+  } else { // 'newest'
+    arr.sort(function (a, b) {
+      return String(b.joinedAt || '').localeCompare(String(a.joinedAt || ''));
+    });
+  }
+  return arr;
+}
+
+/* CSV export of the member roster (header + one row per member). */
+function membersToCSV(list) {
+  const escCell = function (v) {
+    const s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const rows = [['name', 'visits', 'rewards_earned', 'rewards_redeemed', 'rewards_available', 'last_visit', 'joined']];
+  (list || []).forEach(function (m) {
+    rows.push([
+      m.name, m.visits, rewardsEarned(m),
+      Number.isFinite(Number(m.redeemed)) ? Number(m.redeemed) : 0,
+      rewardsAvailable(m),
+      m.lastVisitAt || '',
+      (m.joinedAt || '').slice(0, 10)
+    ]);
+  });
+  return rows.map(function (r) { return r.map(escCell).join(','); }).join('\n');
 }
 
 /* Reset the internal id counter (useful for tests). */
@@ -417,7 +491,12 @@ if (typeof module !== 'undefined' && module.exports) {
     punchCardSpec: punchCardSpec,
     createMember: createMember,
     rewardsEarned: rewardsEarned,
+    rewardsAvailable: rewardsAvailable,
+    redeemReward: redeemReward,
     logVisit: logVisit,
+    searchMembers: searchMembers,
+    sortMembers: sortMembers,
+    membersToCSV: membersToCSV,
     _resetMemberSeq: _resetMemberSeq
   };
 }

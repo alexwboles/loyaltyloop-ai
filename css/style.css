@@ -325,11 +325,11 @@ table.data th { background: var(--paper-deep); font-size: 12.5px; text-transform
   flex-wrap: wrap;
   box-shadow: var(--shadow);
 }
-.member-name { font-weight: 700; font-size: 15.5px; flex: 1 1 150px; }
-.member-stats { color: var(--muted); font-size: 13.5px; flex: 1 1 170px; }
+.member-name { font-weight: 700; font-size: 15.5px; flex: 1 1 140px; }
+.member-stats { color: var(--muted); font-size: 13.5px; flex: 2 1 250px; }
 .reward-pill {
   background: var(--gold-soft); color: var(--gold-dark);
-  border: 1px solid #ecd3a3;
+  border: 1px solid #ecd3a3; white-space: nowrap;
   border-radius: 0; padding: 3px 12px; font-size: 12.5px; font-weight: 700;
 }
 .stamp-mini-card { display: flex; gap: 5px; align-items: center; flex: 2 1 200px; }
@@ -342,6 +342,23 @@ table.data th { background: var(--paper-deep); font-size: 12.5px; text-transform
 .remove-btn:hover { background: var(--bad-bg); }
 
 .empty-note { color: var(--muted); font-style: italic; }
+
+.member-finder { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0 16px; }
+.member-finder input[type="search"] {
+  flex: 1 1 220px; padding: 10px 14px; font-size: 14.5px; font-family: inherit;
+  border: 1.5px solid var(--border); border-radius: 0; background: #fff; color: var(--ink);
+}
+.member-finder input[type="search"]:focus { outline: 3px solid var(--focus-ring); outline-offset: 1px; border-color: var(--gold); }
+.sort-wrap { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.sort-wrap select {
+  padding: 10px 12px; font-size: 14px; font-family: inherit; border: 1.5px solid var(--border);
+  border-radius: 0; background: #fff; color: var(--ink);
+}
+.sort-wrap select:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
+.redeem-btn { background: var(--gold); box-shadow: none; }
+.redeem-btn:hover { background: var(--gold-dark); }
+.redeem-btn:disabled { background: #e9e2d4; color: #a89c86; cursor: not-allowed; transform: none; }
+.redeemed-note { color: var(--muted); font-size: 12.5px; }
 
 /* ---- Printable punch card — a perforated ticket ---- */
 .print-sheet {

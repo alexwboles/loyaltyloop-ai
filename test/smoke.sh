@@ -33,7 +33,8 @@ pass "node --check js/app.js"
 node <<'EOF' || fail "logic.js module exports"
 const L = require('./js/logic.js');
 const fns = ['recommendProgram','calculateEconomics','breakEvenLift','createMember',
-  'logVisit','rewardsEarned','punchCardSpec','normalizeType','fmtMoney'];
+  'logVisit','rewardsEarned','rewardsAvailable','redeemReward','searchMembers',
+  'sortMembers','membersToCSV','punchCardSpec','normalizeType','fmtMoney'];
 for (const f of fns) if (typeof L[f] !== 'function') { console.error('missing fn: ' + f); process.exit(1); }
 for (const t of ['STRUCTURES','BUSINESS_TYPES','RECOMMENDATIONS']) if (!L[t]) { console.error('missing table: ' + t); process.exit(1); }
 EOF
@@ -163,6 +164,102 @@ grep -qi 'free' README.md || fail "README missing free note"
 grep -qi 'local' README.md || fail "README missing local-first note"
 grep -q 'index.html' README.md || fail "README missing how-to-run"
 pass "README covers features, how to run, free/local-first"
+
+# 15. reward redemption: earned - redeemed = available; throws when none
+node <<'EOF' || fail "redeemReward math"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Sam', { punchesPerCard: 5 });
+for (let i = 0; i < 12; i++) L.logVisit(m); // 2 earned
+if (L.rewardsEarned(m) !== 2) { console.error('earned=' + L.rewardsEarned(m)); process.exit(1); }
+if (L.rewardsAvailable(m) !== 2) { console.error('available=' + L.rewardsAvailable(m)); process.exit(1); }
+const r = L.redeemReward(m);
+if (m.redeemed !== 1 || r.rewardsAvailable !== 1) { console.error('redeem wrong'); process.exit(1); }
+L.redeemReward(m);
+let threw = false;
+try { L.redeemReward(m); } catch (e) { threw = true; }
+if (!threw) { console.error('redeem with none available should throw'); process.exit(1); }
+if (L.rewardsAvailable(m) !== 0) { console.error('available should be 0'); process.exit(1); }
+EOF
+pass "redeemReward: earn 2, redeem 2, throws on third"
+
+# 16. redeem tolerates old member records without redeemed/lastVisitAt fields
+node <<'EOF' || fail "redeemReward old-record tolerance"
+const L = require('./js/logic.js');
+// simulate a record saved before these fields existed
+const old = { id: 'm_old', name: 'Old Record', visits: 10, punchesPerCard: 10, joinedAt: '2026-01-01T00:00:00.000Z' };
+if (L.rewardsAvailable(old) !== 1) { console.error('old record available wrong'); process.exit(1); }
+L.redeemReward(old);
+if (old.redeemed !== 1 || L.rewardsAvailable(old) !== 0) { console.error('old record redeem wrong'); process.exit(1); }
+if (L.rewardsAvailable({ visits: 3 }) !== 0) { console.error('missing punchesPerCard should be 0'); process.exit(1); }
+EOF
+pass "rewardsAvailable/redeemReward tolerate pre-upgrade records"
+
+# 17. logVisit stamps lastVisitAt (injectable for tests)
+node <<'EOF' || fail "logVisit lastVisitAt"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Tim', { punchesPerCard: 10 });
+if (m.lastVisitAt !== null || m.redeemed !== 0) { console.error('new member fields wrong'); process.exit(1); }
+const r = L.logVisit(m, '2026-10-07T09:30:00.000Z');
+if (r.lastVisitAt !== '2026-10-07T09:30:00.000Z' || m.lastVisitAt !== '2026-10-07T09:30:00.000Z') {
+  console.error('lastVisitAt not stamped'); process.exit(1);
+}
+const r2 = L.logVisit(m); // default = now
+if (!r2.lastVisitAt || isNaN(Date.parse(r2.lastVisitAt))) { console.error('default lastVisitAt wrong'); process.exit(1); }
+EOF
+pass "logVisit stamps lastVisitAt (injectable or now)"
+
+# 18. searchMembers + sortMembers
+node <<'EOF' || fail "searchMembers/sortMembers"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const a = L.createMember('Zoe Alpha', { punchesPerCard: 10 }); a.joinedAt = '2026-01-03T00:00:00.000Z';
+const b = L.createMember('mike beta', { punchesPerCard: 10 }); b.joinedAt = '2026-01-01T00:00:00.000Z';
+const c = L.createMember('Ann Gamma', { punchesPerCard: 10 }); c.joinedAt = '2026-01-02T00:00:00.000Z';
+for (let i = 0; i < 5; i++) L.logVisit(c);
+const list = [a, b, c];
+const orig = list.slice();
+if (L.searchMembers(list, 'miKE').length !== 1 || L.searchMembers(list, 'miKE')[0] !== b) {
+  console.error('search case-insensitive wrong'); process.exit(1);
+}
+if (L.searchMembers(list, 'zzz').length !== 0) { console.error('search no-match wrong'); process.exit(1); }
+if (L.searchMembers(list, '').length !== 3) { console.error('empty search should return all'); process.exit(1); }
+const byName = L.sortMembers(list, 'name').map(m => m.name);
+if (byName.join('|') !== 'Ann Gamma|mike beta|Zoe Alpha') { console.error('name sort: ' + byName); process.exit(1); }
+const byVisits = L.sortMembers(list, 'visits');
+if (byVisits[0] !== c) { console.error('visits sort wrong'); process.exit(1); }
+const byNewest = L.sortMembers(list, 'newest');
+if (byNewest[0] !== a || byNewest[2] !== b) { console.error('newest sort wrong'); process.exit(1); }
+if (list.join('|') !== orig.join('|')) { console.error('sortMembers must not mutate'); process.exit(1); }
+EOF
+pass "searchMembers filters case-insensitively; sortMembers: name/visits/newest, no mutation"
+
+# 19. membersToCSV: header + one row per member, quoted commas
+node <<'EOF' || fail "membersToCSV"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('O"Brien, Pat', { punchesPerCard: 10 });
+for (let i = 0; i < 10; i++) L.logVisit(m, '2026-10-07T09:30:00.000Z');
+L.redeemReward(m);
+const csv = L.membersToCSV([m]);
+const lines = csv.split('\n');
+if (lines[0] !== 'name,visits,rewards_earned,rewards_redeemed,rewards_available,last_visit,joined') {
+  console.error('header: ' + lines[0]); process.exit(1);
+}
+if (lines.length !== 2) { console.error('expected 2 lines, got ' + lines.length); process.exit(1); }
+// name with comma+quote must be quoted and escaped: "O""Brien, Pat"
+if (lines[1].indexOf('"O""Brien, Pat"') !== 0) { console.error('quoting: ' + lines[1]); process.exit(1); }
+// visits=10 earned=1 redeemed=1 available=0
+if (lines[1].indexOf(',10,1,1,0,') === -1) { console.error('counts: ' + lines[1]); process.exit(1); }
+EOF
+pass "membersToCSV: header, quoted names, correct counts"
+
+# 20. index.html has the new member controls
+for id in member-search member-sort member-csv-btn; do
+  grep -q "id=\"$id\"" index.html || fail "index.html missing element id=$id"
+done
+pass "index.html has member search/sort/export controls"
 
 echo "---"
 echo "smoke: $PASS passed, $FAIL failed"

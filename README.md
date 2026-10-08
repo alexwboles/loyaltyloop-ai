@@ -19,8 +19,11 @@ tracks members and visits.
 3. **Printable punch card & signup sheet** — enter your business name, preview a
    punch-card grid with a member-name line plus a signup table (name/phone/email),
    and print cleanly (`@media print` hides all app chrome).
-4. **Member tracker** — add members, log visits with one click, see visit counts
-   and rewards earned. Persisted in `localStorage`; nothing ever leaves the browser.
+4. **Member tracker** — add members, log visits with one click, see visit counts,
+   last-visit dates, and rewards earned. **Redeem rewards** with one click
+   (available rewards = earned − redeemed). **Search** members by name, **sort**
+   by newest / name / most visits, and **export the roster to CSV**.
+   Persisted in `localStorage`; nothing ever leaves the browser.
 
 ## How to run
 

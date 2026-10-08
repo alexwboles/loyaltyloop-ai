@@ -140,24 +140,47 @@
       cells + '<span class="punch-frac">' + filled + '/' + per + '</span></span>';
   }
 
+  var memberSearch = '';
+  var memberSort = 'newest';
+
+  function fmtLastVisit(iso) {
+    if (!iso) return 'no visits yet';
+    try {
+      var d = new Date(iso);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return 'recently'; }
+  }
+
   function renderMembers() {
-    var list = loadMembers();
+    var all = loadMembers();
     var box = $('member-list');
     var count = $('member-count');
-    if (count) count.textContent = list.length ? String(list.length) : '';
-    if (!list.length) {
+    if (count) count.textContent = all.length ? String(all.length) : '';
+    var list = sortMembers(searchMembers(all, memberSearch), memberSort);
+    if (!all.length) {
       box.innerHTML = '<p class="empty-note">No members yet — add your first member above.</p>';
+      return;
+    }
+    if (!list.length) {
+      box.innerHTML = '<p class="empty-note">No members match "' + esc(memberSearch) + '". Try a different search.</p>';
       return;
     }
     var html = list.map(function (m) {
       var earned = rewardsEarned(m);
+      var available = rewardsAvailable(m);
+      var redeemed = Number.isFinite(Number(m.redeemed)) ? Number(m.redeemed) : 0;
       return '<div class="member-row" data-id="' + esc(m.id) + '">' +
         '<span class="member-name">' + esc(m.name) + '</span>' +
         stampStrip(m) +
         '<span class="member-stats">' + m.visits + ' visit' + (m.visits === 1 ? '' : 's') +
+        ' · last visit: ' + esc(fmtLastVisit(m.lastVisitAt)) +
         (earned ? ' &middot; <span class="reward-pill">' + earned + ' reward' + (earned === 1 ? '' : 's') + ' earned</span>' : '') +
+        (redeemed ? ' <span class="redeemed-note">' + redeemed + ' redeemed</span>' : '') +
         '</span>' +
         '<button class="btn small visit-btn" type="button">+1 visit</button>' +
+        '<button class="btn small redeem-btn" type="button"' + (available < 1 ? ' disabled' : '') +
+        ' title="' + (available < 1 ? 'No rewards to redeem yet' : available + ' reward(s) ready to redeem') + '">' +
+        'Redeem' + (available > 0 ? ' (' + available + ')' : '') + '</button>' +
         '<button class="btn small secondary remove-btn" type="button">Remove</button>' +
       '</div>';
     }).join('');
@@ -176,6 +199,22 @@
         }
       });
     });
+    Array.prototype.forEach.call(box.querySelectorAll('.redeem-btn'), function (btn) {
+      btn.addEventListener('click', function () {
+        var list2 = loadMembers();
+        var m = findMember(list2, btn.closest('.member-row').dataset.id);
+        if (!m) return;
+        try {
+          redeemReward(m);
+        } catch (e) {
+          showToast('No rewards available to redeem yet.');
+          return;
+        }
+        saveMembers(list2);
+        renderMembers();
+        showToast('Reward redeemed for ' + m.name + ' — enjoy!');
+      });
+    });
     Array.prototype.forEach.call(box.querySelectorAll('.remove-btn'), function (btn) {
       btn.addEventListener('click', function () {
         var id = btn.closest('.member-row').dataset.id;
@@ -183,6 +222,17 @@
         renderMembers();
       });
     });
+  }
+
+  function downloadCSV() {
+    var csv = membersToCSV(loadMembers());
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'loyaltyloop-members.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 400);
   }
 
   function showToast(msg) {
@@ -206,6 +256,19 @@
     saveMembers(list);
     nameInput.value = '';
     renderMembers();
+  });
+
+  $('member-search').addEventListener('input', function () {
+    memberSearch = $('member-search').value;
+    renderMembers();
+  });
+  $('member-sort').addEventListener('change', function () {
+    memberSort = $('member-sort').value;
+    renderMembers();
+  });
+  $('member-csv-btn').addEventListener('click', function () {
+    if (!loadMembers().length) { showToast('No members to export yet.'); return; }
+    downloadCSV();
   });
 
   /* ---------- boot ---------- */

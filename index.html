@@ -126,6 +126,17 @@
       </div>
       <button id="member-add-btn" class="btn no-print" type="button">Add member</button>
       <h3>Members</h3>
+      <div class="member-finder no-print">
+        <input id="member-search" type="search" placeholder="Search members by name…" aria-label="Search members">
+        <label class="sort-wrap">Sort
+          <select id="member-sort" aria-label="Sort members">
+            <option value="newest">Newest first</option>
+            <option value="name">Name A–Z</option>
+            <option value="visits">Most visits</option>
+          </select>
+        </label>
+        <button id="member-csv-btn" class="btn secondary small" type="button">Export CSV</button>
+      </div>
       <div id="member-list"></div>
     </div>
   </section>

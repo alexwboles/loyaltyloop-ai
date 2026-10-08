@@ -119,6 +119,61 @@ if (!/lower the reward cost|more visits per reward/i.test(r.verdict)) {
 EOF
 pass "flow 7: reward costlier than visit profit -> Infinity break-even, honest verdict"
 
+# Flow 8: visit -> earn -> redeem -> available math across the whole journey
+node <<'EOF' || fail "flow 8: visit -> earn -> redeem journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Rosa Diaz', { punchesPerCard: 8 });
+for (let i = 0; i < 8; i++) {
+  const r = L.logVisit(m, '2026-10-0' + (i + 1) + 'T10:00:00.000Z');
+  if (i === 7 && !r.rewardEarnedNow) { console.error('8th visit should earn'); process.exit(1); }
+}
+if (m.lastVisitAt !== '2026-10-08T10:00:00.000Z') { console.error('lastVisitAt=' + m.lastVisitAt); process.exit(1); }
+if (L.rewardsAvailable(m) !== 1) { console.error('available=' + L.rewardsAvailable(m)); process.exit(1); }
+L.redeemReward(m);
+if (L.rewardsAvailable(m) !== 0 || m.redeemed !== 1) { console.error('after redeem wrong'); process.exit(1); }
+// earning a second card restores availability
+for (let i = 0; i < 8; i++) L.logVisit(m);
+if (L.rewardsAvailable(m) !== 1) { console.error('second card available wrong'); process.exit(1); }
+EOF
+pass "flow 8: 8 visits earn a reward, lastVisitAt tracked, redeem zeroes availability"
+
+# Flow 9: roster search + sort as the owner would use them
+node <<'EOF' || fail "flow 9: search + sort roster"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const names = ['Priya Nair', 'Tom Baker', 'priya sharma', 'Zed Cole'];
+const roster = names.map((n, i) => {
+  const m = L.createMember(n, { punchesPerCard: 10 });
+  m.joinedAt = '2026-09-0' + (i + 1) + 'T00:00:00.000Z';
+  for (let v = 0; v < i * 3; v++) L.logVisit(m);
+  return m;
+});
+const hits = L.sortMembers(L.searchMembers(roster, 'priya'), 'visits');
+if (hits.length !== 2 || hits[0].name !== 'priya sharma') {
+  console.error('search+sort: ' + hits.map(h => h.name).join(',')); process.exit(1);
+}
+const alpha = L.sortMembers(roster, 'name').map(m => m.name);
+if (alpha[0] !== 'Priya Nair' || alpha[3] !== 'Zed Cole') { console.error('alpha: ' + alpha); process.exit(1); }
+EOF
+pass "flow 9: search 'priya' -> 2 hits sorted by visits; A-Z ordering"
+
+# Flow 10: roster -> CSV has one data row per member with correct numbers
+node <<'EOF' || fail "flow 10: roster CSV export"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const a = L.createMember('Ava', { punchesPerCard: 5 });
+const b = L.createMember('Ben', { punchesPerCard: 10 });
+for (let i = 0; i < 10; i++) L.logVisit(a);
+for (let i = 0; i < 4; i++) L.logVisit(b);
+L.redeemReward(a);
+const lines = L.membersToCSV([a, b]).split('\n');
+if (lines.length !== 3) { console.error('lines=' + lines.length); process.exit(1); }
+if (!/^Ava,10,2,1,1,/.test(lines[1])) { console.error('ava: ' + lines[1]); process.exit(1); }
+if (!/^Ben,4,0,0,0,/.test(lines[2])) { console.error('ben: ' + lines[2]); process.exit(1); }
+EOF
+pass "flow 10: membersToCSV rows carry earned/redeemed/available per member"
+
 echo "---"
 echo "e2e: $PASS passed, $FAIL failed"
 exit "$FAIL"
