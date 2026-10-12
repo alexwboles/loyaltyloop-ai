@@ -473,6 +473,60 @@ function _resetMemberSeq() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 5. Win-back: at-risk members, segments, reward progress              */
+/* ------------------------------------------------------------------ */
+
+/* Days since a member's last visit (falls back to join date when never
+ * visited). Null when no date is recorded at all. */
+function daysSinceVisit(member, refISO) {
+  var ref = refISO ? new Date(refISO + 'T12:00:00') : new Date();
+  var stamp = (member && member.lastVisitAt) || (member && member.joinedAt);
+  if (!stamp) return null;
+  var d = new Date(stamp);
+  if (isNaN(d.getTime())) return null;
+  return Math.max(0, Math.floor((ref - d) / 86400000));
+}
+
+/* Members who haven't visited in `days` or more — win-back candidates,
+ * most-lapsed first. Default window: 30 days. */
+function atRiskMembers(list, days, refISO) {
+  var threshold = Math.max(1, Math.round(toNum(days, 30)));
+  return (list || [])
+    .map(function (m) { return { member: m, daysSince: daysSinceVisit(m, refISO) }; })
+    .filter(function (x) { return x.daysSince != null && x.daysSince >= threshold; })
+    .sort(function (a, b) { return b.daysSince - a.daysSince; });
+}
+
+/* Member segment: champion (20+ visits), regular (8+), occasional (2+),
+ * new (under 2), lapsed (no visit in 45+ days). */
+function segmentMember(member, refISO) {
+  var visits = Math.max(0, Math.floor(toNum(member && member.visits, 0)));
+  var since = daysSinceVisit(member, refISO);
+  if (since != null && since >= 45 && visits > 0) return 'lapsed';
+  if (visits >= 20) return 'champion';
+  if (visits >= 8) return 'regular';
+  if (visits >= 2) return 'occasional';
+  return 'new';
+}
+
+function segmentCounts(list, refISO) {
+  var counts = { champion: 0, regular: 0, occasional: 0, new: 0, lapsed: 0 };
+  (list || []).forEach(function (m) { counts[segmentMember(m, refISO)]++; });
+  return counts;
+}
+
+/* Progress toward the next free reward: {perCard, intoCard, toGo, pct}. */
+function visitsToNextReward(member) {
+  var per = Math.max(1, Math.round(toNum(member && member.punchesPerCard, 10)));
+  var visits = Math.max(0, Math.floor(toNum(member && member.visits, 0)));
+  var into = visits % per;
+  var toGo = into === 0 ? per : per - into; // fresh card still needs a full card
+  if (visits > 0 && into === 0) toGo = 0;  // reward just earned
+  return { perCard: per, visits: visits, intoCard: into, toGo: toGo,
+           pct: Math.round((into / per) * 100) };
+}
+
+/* ------------------------------------------------------------------ */
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -497,6 +551,11 @@ if (typeof module !== 'undefined' && module.exports) {
     searchMembers: searchMembers,
     sortMembers: sortMembers,
     membersToCSV: membersToCSV,
+    daysSinceVisit: daysSinceVisit,
+    atRiskMembers: atRiskMembers,
+    segmentMember: segmentMember,
+    segmentCounts: segmentCounts,
+    visitsToNextReward: visitsToNextReward,
     _resetMemberSeq: _resetMemberSeq
   };
 }

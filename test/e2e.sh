@@ -174,6 +174,49 @@ if (!/^Ben,4,0,0,0,/.test(lines[2])) { console.error('ben: ' + lines[2]); proces
 EOF
 pass "flow 10: membersToCSV rows carry earned/redeemed/available per member"
 
+# Flow 11: win-back journey — lapsed regulars surface for outreach
+node <<'EOF' || fail "flow 11: win-back journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const ref = '2026-10-12';
+function mk(name, visits, lastVisitAt) {
+  const m = L.createMember(name, { punchesPerCard: 10 });
+  m.visits = visits; m.lastVisitAt = lastVisitAt; m.joinedAt = '2026-01-01T00:00:00.000Z';
+  return m;
+}
+// Simulate a year of member history: a champion, a lapsed regular, a fresh face
+const champ = mk('Maria', 30, '2026-10-11T09:00:00.000Z');
+for (let i = 0; i < 30; i++) L.logVisit(champ, '2026-09-' + String(10 + (i % 18)).padStart(2, '0') + 'T09:00:00.000Z');
+const lapsed = mk('Dave', 15, '2026-07-01T09:00:00.000Z');
+const fresh = mk('Nina', 1, '2026-10-10T09:00:00.000Z');
+const list = [champ, lapsed, fresh];
+const risk = L.atRiskMembers(list, 30, ref);
+if (risk.length !== 1 || risk[0].member.name !== 'Dave') { console.error('win-back list wrong'); process.exit(1); }
+if (L.segmentMember(lapsed, ref) !== 'lapsed') { console.error('Dave should be lapsed'); process.exit(1); }
+if (L.segmentMember(champ, ref) !== 'champion') { console.error('Maria should be champion'); process.exit(1); }
+// Dave comes back: one visit clears him from the at-risk list
+L.logVisit(lapsed, '2026-10-12T09:00:00.000Z');
+if (L.atRiskMembers(list, 30, ref).length !== 0) { console.error('Dave still at risk after visit'); process.exit(1); }
+EOF
+pass "flow 11: lapsed regular flagged for win-back; a new visit clears him"
+
+# Flow 12: reward progress journey — member watches punches fill toward a freebie
+node <<'EOF' || fail "flow 12: reward progress journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Sam', { punchesPerCard: 8 });
+for (let i = 1; i <= 6; i++) L.logVisit(m);
+let p = L.visitsToNextReward(m);
+if (p.toGo !== 2 || p.pct !== 75) { console.error('6/8 progress wrong: ' + JSON.stringify(p)); process.exit(1); }
+L.logVisit(m); L.logVisit(m); // 8th visit earns the reward
+p = L.visitsToNextReward(m);
+if (p.toGo !== 0) { console.error('reward should be earned at 8'); process.exit(1); }
+L.redeemReward(m);
+const avail = L.rewardsAvailable(m);
+if (avail !== 0) { console.error('after redeem, available should be 0'); process.exit(1); }
+EOF
+pass "flow 12: 6/8 visits -> 75% progress -> reward at 8th -> redeemed"
+
 echo "---"
 echo "e2e: $PASS passed, $FAIL failed"
 exit "$FAIL"

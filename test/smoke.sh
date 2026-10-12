@@ -34,7 +34,8 @@ node <<'EOF' || fail "logic.js module exports"
 const L = require('./js/logic.js');
 const fns = ['recommendProgram','calculateEconomics','breakEvenLift','createMember',
   'logVisit','rewardsEarned','rewardsAvailable','redeemReward','searchMembers',
-  'sortMembers','membersToCSV','punchCardSpec','normalizeType','fmtMoney'];
+  'sortMembers','membersToCSV','punchCardSpec','normalizeType','fmtMoney',
+  'daysSinceVisit','atRiskMembers','segmentMember','segmentCounts','visitsToNextReward'];
 for (const f of fns) if (typeof L[f] !== 'function') { console.error('missing fn: ' + f); process.exit(1); }
 for (const t of ['STRUCTURES','BUSINESS_TYPES','RECOMMENDATIONS']) if (!L[t]) { console.error('missing table: ' + t); process.exit(1); }
 EOF
@@ -260,6 +261,71 @@ for id in member-search member-sort member-csv-btn; do
   grep -q "id=\"$id\"" index.html || fail "index.html missing element id=$id"
 done
 pass "index.html has member search/sort/export controls"
+
+# win-back: at-risk members
+node <<'EOF' || fail "atRiskMembers"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const ref = '2026-10-12';
+function mk(name, visits, lastVisitAt) {
+  const m = L.createMember(name, { punchesPerCard: 10 });
+  m.visits = visits; m.lastVisitAt = lastVisitAt; m.joinedAt = '2026-01-01T00:00:00.000Z';
+  return m;
+}
+const list = [
+  mk('Ava', 25, '2026-10-01T10:00:00.000Z'),   // 11 days ago — fine
+  mk('Ben', 5, '2026-08-01T10:00:00.000Z'),    // 72 days ago — at risk
+  mk('Cy', 3, '2026-09-01T10:00:00.000Z'),     // 41 days ago — at risk
+  mk('Dee', 0, null)                           // never visited, joined Jan — at risk
+];
+const risk = L.atRiskMembers(list, 30, ref);
+if (risk.length !== 3) { console.error('risk count ' + risk.length); process.exit(1); }
+if (risk[0].member.name !== 'Dee' || risk[0].daysSince < 200) { console.error('most-lapsed first wrong'); process.exit(1); }
+if (L.daysSinceVisit(list[0], ref) !== 11) { console.error('daysSince ' + L.daysSinceVisit(list[0], ref)); process.exit(1); }
+EOF
+pass "win-back: 3 at-risk members, most-lapsed first, days-since math"
+
+# segments
+node <<'EOF' || fail "segments"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const ref = '2026-10-12';
+function mk(name, visits, lastVisitAt) {
+  const m = L.createMember(name, { punchesPerCard: 10 });
+  m.visits = visits; m.lastVisitAt = lastVisitAt; m.joinedAt = '2026-10-01T00:00:00.000Z';
+  return m;
+}
+const cases = [
+  ['champ', 25, '2026-10-10T00:00:00Z', 'champion'],
+  ['reg', 8, '2026-10-10T00:00:00Z', 'regular'],
+  ['occ', 3, '2026-10-10T00:00:00Z', 'occasional'],
+  ['newbie', 1, '2026-10-10T00:00:00Z', 'new'],
+  ['gone', 12, '2026-06-01T00:00:00Z', 'lapsed']
+];
+for (const [n, v, lv, want] of cases) {
+  const got = L.segmentMember(mk(n, v, lv), ref);
+  if (got !== want) { console.error(n + ' -> ' + got + ' want ' + want); process.exit(1); }
+}
+const counts = L.segmentCounts(cases.map(c => mk(c[0], c[1], c[2])), ref);
+if (counts.champion !== 1 || counts.lapsed !== 1 || counts.new !== 1) { console.error(JSON.stringify(counts)); process.exit(1); }
+EOF
+pass "segments: champion/regular/occasional/new/lapsed + counts"
+
+# reward progress
+node <<'EOF' || fail "visitsToNextReward"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Zed', { punchesPerCard: 10 });
+let p = L.visitsToNextReward(m);
+if (p.toGo !== 10 || p.pct !== 0) { console.error('fresh: ' + JSON.stringify(p)); process.exit(1); }
+m.visits = 4;
+p = L.visitsToNextReward(m);
+if (p.toGo !== 6 || p.pct !== 40 || p.intoCard !== 4) { console.error('4 visits: ' + JSON.stringify(p)); process.exit(1); }
+m.visits = 10;
+p = L.visitsToNextReward(m);
+if (p.toGo !== 0 || p.pct !== 0) { console.error('reward earned: ' + JSON.stringify(p)); process.exit(1); }
+EOF
+pass "visitsToNextReward: 0/10 -> 4/10 -> reward earned"
 
 echo "---"
 echo "smoke: $PASS passed, $FAIL failed"

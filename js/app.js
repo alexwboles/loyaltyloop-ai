@@ -165,18 +165,24 @@
       box.innerHTML = '<p class="empty-note">No members match "' + esc(memberSearch) + '". Try a different search.</p>';
       return;
     }
-    var html = list.map(function (m) {
+    var html = renderSegmentSummary(all) + list.map(function (m) {
       var earned = rewardsEarned(m);
       var available = rewardsAvailable(m);
       var redeemed = Number.isFinite(Number(m.redeemed)) ? Number(m.redeemed) : 0;
+      var prog = visitsToNextReward(m);
+      var seg = segmentMember(m);
       return '<div class="member-row" data-id="' + esc(m.id) + '">' +
-        '<span class="member-name">' + esc(m.name) + '</span>' +
+        '<span class="member-name">' + esc(m.name) +
+        ' <span class="seg-badge seg-' + seg + '">' + seg + '</span></span>' +
         stampStrip(m) +
         '<span class="member-stats">' + m.visits + ' visit' + (m.visits === 1 ? '' : 's') +
         ' · last visit: ' + esc(fmtLastVisit(m.lastVisitAt)) +
         (earned ? ' &middot; <span class="reward-pill">' + earned + ' reward' + (earned === 1 ? '' : 's') + ' earned</span>' : '') +
         (redeemed ? ' <span class="redeemed-note">' + redeemed + ' redeemed</span>' : '') +
         '</span>' +
+        '<span class="reward-progress" title="' + prog.toGo + ' visit' + (prog.toGo === 1 ? '' : 's') + ' to the next reward">' +
+        '<span class="rp-track"><span class="rp-fill" style="width:' + prog.pct + '%"></span></span>' +
+        '<span class="rp-label">' + prog.intoCard + '/' + prog.perCard + ' to next reward</span></span>' +
         '<button class="btn small visit-btn" type="button">+1 visit</button>' +
         '<button class="btn small redeem-btn" type="button"' + (available < 1 ? ' disabled' : '') +
         ' title="' + (available < 1 ? 'No rewards to redeem yet' : available + ' reward(s) ready to redeem') + '">' +
@@ -184,7 +190,7 @@
         '<button class="btn small secondary remove-btn" type="button">Remove</button>' +
       '</div>';
     }).join('');
-    box.innerHTML = html;
+    box.innerHTML = html + renderWinBack(all);
 
     Array.prototype.forEach.call(box.querySelectorAll('.visit-btn'), function (btn) {
       btn.addEventListener('click', function () {
@@ -222,6 +228,27 @@
         renderMembers();
       });
     });
+  }
+
+  function renderSegmentSummary(all) {
+    if (!all.length) return '';
+    var c = segmentCounts(all);
+    var parts = ['champion', 'regular', 'occasional', 'new', 'lapsed']
+      .filter(function (k) { return c[k] > 0; })
+      .map(function (k) { return '<span class="seg-badge seg-' + k + '">' + c[k] + ' ' + k + '</span>'; });
+    return '<div class="segment-summary">Member mix: ' + parts.join(' ') + '</div>';
+  }
+
+  function renderWinBack(all) {
+    var risk = atRiskMembers(all, 30);
+    if (!risk.length) return '';
+    var rows = risk.slice(0, 10).map(function (x) {
+      return '<div class="risk-row"><span>' + esc(x.member.name) + '</span>' +
+        '<span class="muted">' + x.daysSince + ' days since last visit</span></div>';
+    }).join('');
+    return '<div class="winback"><h3>Win back (' + risk.length + ')</h3>' +
+      '<p class="muted small">No visit in 30+ days — a personal nudge brings regulars back.</p>' +
+      rows + (risk.length > 10 ? '<p class="muted small">+ ' + (risk.length - 10) + ' more</p>' : '') + '</div>';
   }
 
   function downloadCSV() {
