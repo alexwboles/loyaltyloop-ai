@@ -120,8 +120,19 @@
         <label class="field">Member name
           <input id="member-name" type="text" placeholder="e.g. Maria Lopez" maxlength="80">
         </label>
-        <label class="field">Punches per reward card
+        <label class="field">Program type
+          <select id="member-mode">
+            <option value="punches">Punch card — buy N, get 1 free</option>
+            <option value="points">Points — earn per dollar spent</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid-2 no-print">
+        <label class="field" id="member-punches-wrap">Punches per reward card
           <input id="member-punches" type="number" min="1" max="25" step="1" value="10" inputmode="numeric">
+        </label>
+        <label class="field" id="member-ppreward-wrap" style="display:none">Points per reward
+          <input id="member-ppreward" type="number" min="1" max="1000" step="1" value="100" inputmode="numeric">
         </label>
       </div>
       <button id="member-add-btn" class="btn no-print" type="button">Add member</button>
@@ -136,6 +147,8 @@
           </select>
         </label>
         <button id="member-csv-btn" class="btn secondary small" type="button">Export CSV</button>
+        <button id="member-import-btn" class="btn secondary small" type="button">Import CSV</button>
+        <input id="member-import-file" type="file" accept=".csv,text/csv" style="display:none" aria-hidden="true">
       </div>
       <div id="member-list"></div>
     </div>

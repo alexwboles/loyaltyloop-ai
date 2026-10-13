@@ -217,6 +217,68 @@ if (avail !== 0) { console.error('after redeem, available should be 0'); process
 EOF
 pass "flow 12: 6/8 visits -> 75% progress -> reward at 8th -> redeemed"
 
+# Flow 13: points member journey — purchases earn points, redeem deducts
+node <<'EOF' || fail "flow 13: points member journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+// A retail shop runs the points program: 1 pt per $1, reward every 200 pts.
+const m = L.createMember('Rita Retail', { mode: 'points', pointsPerDollar: 1, pointsPerReward: 200 });
+const p1 = L.logPurchase(m, 85.50);
+if (p1.pointsEarned !== 85.5 || p1.points !== 85.5) { console.error('p1: ' + JSON.stringify(p1)); process.exit(1); }
+const p2 = L.logPurchase(m, 120);
+if (!p2.rewardEarnedNow || L.rewardsAvailable(m) !== 1) { console.error('p2: ' + JSON.stringify(p2)); process.exit(1); }
+// purchases count as visits too (CSV + stats stay consistent)
+if (m.visits !== 2) { console.error('visits should be 2, got ' + m.visits); process.exit(1); }
+L.redeemReward(m);
+if (m.points !== 5.5 || m.redeemed !== 1 || L.rewardsAvailable(m) !== 0) {
+  console.error('redeem: points=' + m.points + ' redeemed=' + m.redeemed); process.exit(1);
+}
+const prog = L.visitsToNextReward(m);
+if (!prog.points || prog.intoCard !== 5 || prog.toGo !== 195) { console.error('prog: ' + JSON.stringify(prog)); process.exit(1); }
+EOF
+pass "flow 13: points member earns on spend, redeems, balance deducts"
+
+# Flow 14: win-back nudge journey — lapsed member gets a tailored message
+node <<'EOF' || fail "flow 14: win-back nudge journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const ref = '2026-10-12';
+function mk(name, visits, lastVisitAt) {
+  const m = L.createMember(name, { punchesPerCard: 10 });
+  m.visits = visits; m.lastVisitAt = lastVisitAt; m.joinedAt = '2026-01-01T00:00:00.000Z';
+  return m;
+}
+const lapsed = mk('Nina Lapsed', 12, '2026-08-20T10:00:00.000Z'); // 53 days ago
+const recent = mk('Rex Recent', 12, '2026-10-10T10:00:00.000Z');
+const risk = L.atRiskMembers([lapsed, recent], 30, ref);
+if (risk.length !== 1 || risk[0].member.name !== 'Nina Lapsed') { console.error('risk: ' + JSON.stringify(risk.map(r => r.member.name))); process.exit(1); }
+const msg = L.winBackMessage(risk[0].member, risk[0].daysSince, 'a free pastry with your coffee', 'Sunrise Bakery');
+if (msg.indexOf('Hi Nina') !== 0 || msg.indexOf('53 days') === -1) { console.error('msg: ' + msg); process.exit(1); }
+if (msg.indexOf('free pastry with your coffee') === -1 || msg.indexOf('Sunrise Bakery') === -1) { console.error('msg2: ' + msg); process.exit(1); }
+// punches progress hook: 12 visits on a 10-card -> 2 into next card -> 8 to go
+if (msg.indexOf('8 visits away') === -1) { console.error('hook: ' + msg); process.exit(1); }
+EOF
+pass "flow 14: at-risk member surfaces, nudge message is personalized"
+
+# Flow 15: CSV import journey — a paper signup sheet becomes members
+node <<'EOF' || fail "flow 15: CSV import journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const sheet = 'name,punches_per_card\nAmy Alvarez,5\nBen Brooks\n\nCara Chen,8\n';
+const res = L.membersFromCSV(sheet);
+if (res.members.length !== 3 || res.skipped !== 1) { console.error('import: ' + JSON.stringify(res)); process.exit(1); }
+// imported members behave like hand-added ones
+const amy = res.members[0];
+for (let i = 0; i < 5; i++) L.logVisit(amy);
+if (L.rewardsEarned(amy) !== 1) { console.error('amy should earn at 5 visits'); process.exit(1); }
+const cara = res.members[2];
+if (cara.punchesPerCard !== 8) { console.error('cara card size'); process.exit(1); }
+// and they appear in the roster export
+const csv = L.membersToCSV(res.members);
+if (csv.split('\n').length !== 4 || csv.indexOf('Amy Alvarez') === -1) { console.error('csv: ' + csv); process.exit(1); }
+EOF
+pass "flow 15: CSV import -> working members -> roster export"
+
 echo "---"
 echo "e2e: $PASS passed, $FAIL failed"
 exit "$FAIL"

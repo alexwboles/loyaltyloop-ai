@@ -171,19 +171,33 @@
       var redeemed = Number.isFinite(Number(m.redeemed)) ? Number(m.redeemed) : 0;
       var prog = visitsToNextReward(m);
       var seg = segmentMember(m);
+      var isPoints = m.mode === 'points';
+      var rpLabel = isPoints
+        ? Math.floor(Math.max(0, Number(m.points) || 0)) + '/' + prog.perCard + ' pts to next reward'
+        : prog.intoCard + '/' + prog.perCard + ' to next reward';
+      var rpTitle = isPoints
+        ? prog.toGo + ' points to the next reward'
+        : prog.toGo + ' visit' + (prog.toGo === 1 ? '' : 's') + ' to the next reward';
       return '<div class="member-row" data-id="' + esc(m.id) + '">' +
         '<span class="member-name">' + esc(m.name) +
-        ' <span class="seg-badge seg-' + seg + '">' + seg + '</span></span>' +
-        stampStrip(m) +
+        ' <span class="seg-badge seg-' + seg + '">' + seg + '</span>' +
+        ' <span class="mode-badge mode-' + (isPoints ? 'points' : 'punches') + '">' +
+        (isPoints ? 'points' : 'punches') + '</span></span>' +
+        (isPoints
+          ? '<span class="points-pill" title="Points balance">' + esc(String(Math.floor(Math.max(0, Number(m.points) || 0)))) + ' pts</span>'
+          : stampStrip(m)) +
         '<span class="member-stats">' + m.visits + ' visit' + (m.visits === 1 ? '' : 's') +
         ' · last visit: ' + esc(fmtLastVisit(m.lastVisitAt)) +
         (earned ? ' &middot; <span class="reward-pill">' + earned + ' reward' + (earned === 1 ? '' : 's') + ' earned</span>' : '') +
         (redeemed ? ' <span class="redeemed-note">' + redeemed + ' redeemed</span>' : '') +
         '</span>' +
-        '<span class="reward-progress" title="' + prog.toGo + ' visit' + (prog.toGo === 1 ? '' : 's') + ' to the next reward">' +
+        '<span class="reward-progress" title="' + esc(rpTitle) + '">' +
         '<span class="rp-track"><span class="rp-fill" style="width:' + prog.pct + '%"></span></span>' +
-        '<span class="rp-label">' + prog.intoCard + '/' + prog.perCard + ' to next reward</span></span>' +
-        '<button class="btn small visit-btn" type="button">+1 visit</button>' +
+        '<span class="rp-label">' + esc(rpLabel) + '</span></span>' +
+        (isPoints
+          ? '<span class="purchase-wrap"><input class="purchase-amt" type="number" min="0" step="0.01" placeholder="Spend $" ' +
+            'aria-label="Purchase amount for ' + esc(m.name) + '"><button class="btn small purchase-btn" type="button">Log purchase</button></span>'
+          : '<button class="btn small visit-btn" type="button">+1 visit</button>') +
         '<button class="btn small redeem-btn" type="button"' + (available < 1 ? ' disabled' : '') +
         ' title="' + (available < 1 ? 'No rewards to redeem yet' : available + ' reward(s) ready to redeem') + '">' +
         'Redeem' + (available > 0 ? ' (' + available + ')' : '') + '</button>' +
@@ -191,6 +205,7 @@
       '</div>';
     }).join('');
     box.innerHTML = html + renderWinBack(all);
+    wireNudgeButtons(box);
 
     Array.prototype.forEach.call(box.querySelectorAll('.visit-btn'), function (btn) {
       btn.addEventListener('click', function () {
@@ -203,6 +218,31 @@
         if (res.rewardEarnedNow) {
           showToast(m.name + ' just earned a reward');
         }
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('.purchase-btn'), function (btn) {
+      btn.addEventListener('click', function () {
+        var row = btn.closest('.member-row');
+        var amtInput = row.querySelector('.purchase-amt');
+        var spend = parseFloat(amtInput.value);
+        if (!isFinite(spend) || spend <= 0) {
+          showToast('Enter a purchase amount first.');
+          amtInput.focus();
+          return;
+        }
+        var list2 = loadMembers();
+        var m = findMember(list2, row.dataset.id);
+        if (!m) return;
+        try {
+          var res = logPurchase(m, spend);
+        } catch (e) {
+          showToast(e.message || 'Could not log purchase.');
+          return;
+        }
+        saveMembers(list2);
+        renderMembers();
+        showToast(m.name + ' earned ' + res.pointsEarned + ' pts ($' + res.spend.toFixed(2) + ')' +
+          (res.rewardEarnedNow ? ' — reward unlocked!' : ''));
       });
     });
     Array.prototype.forEach.call(box.querySelectorAll('.redeem-btn'), function (btn) {
@@ -243,12 +283,71 @@
     var risk = atRiskMembers(all, 30);
     if (!risk.length) return '';
     var rows = risk.slice(0, 10).map(function (x) {
-      return '<div class="risk-row"><span>' + esc(x.member.name) + '</span>' +
-        '<span class="muted">' + x.daysSince + ' days since last visit</span></div>';
+      return '<div class="risk-row" data-days="' + x.daysSince + '">' +
+        '<span>' + esc(x.member.name) + '</span>' +
+        '<span class="muted">' + x.daysSince + ' days since last visit</span>' +
+        '<button class="btn small secondary nudge-btn" type="button" data-name="' + esc(x.member.name) + '">Nudge</button>' +
+        '<div class="nudge-panel" style="display:none">' +
+          '<label class="nudge-label">Offer <input class="nudge-offer" type="text" value="10% off your next visit" maxlength="80"></label>' +
+          '<textarea class="nudge-text" rows="4" readonly></textarea>' +
+          '<div><button class="btn small nudge-copy" type="button">Copy message</button></div>' +
+        '</div></div>';
     }).join('');
     return '<div class="winback"><h3>Win back (' + risk.length + ')</h3>' +
-      '<p class="muted small">No visit in 30+ days — a personal nudge brings regulars back.</p>' +
+      '<p class="muted small">No visit in 30+ days — a personal nudge brings regulars back. ' +
+      'Hit Nudge to draft a message, copy it, and send it however you reach them.</p>' +
       rows + (risk.length > 10 ? '<p class="muted small">+ ' + (risk.length - 10) + ' more</p>' : '') + '</div>';
+  }
+
+  function wireNudgeButtons(box) {
+    Array.prototype.forEach.call(box.querySelectorAll('.nudge-btn'), function (btn) {
+      btn.addEventListener('click', function () {
+        var row = btn.closest('.risk-row');
+        var panel = row.querySelector('.nudge-panel');
+        var showing = panel.style.display !== 'none';
+        panel.style.display = showing ? 'none' : 'block';
+        if (showing) return;
+        var offerInput = panel.querySelector('.nudge-offer');
+        var textArea = panel.querySelector('.nudge-text');
+        var all = loadMembers();
+        var m = null;
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].name === btn.getAttribute('data-name')) { m = all[i]; break; }
+        }
+        var days = parseInt(row.getAttribute('data-days'), 10) || 30;
+        var draft = function () {
+          textArea.value = winBackMessage(m, days, offerInput.value, $('pc-name').value);
+        };
+        offerInput.addEventListener('input', draft);
+        draft();
+        panel.querySelector('.nudge-copy').addEventListener('click', function () {
+          copyText(textArea.value, function () { showToast('Message copied — paste it into a text or email.'); });
+        }, { once: true });
+      });
+    });
+  }
+
+  function copyText(text, done) {
+    var finish = function () { if (done) done(); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(finish, function () { legacyCopy(text); finish(); });
+    } else {
+      legacyCopy(text);
+      finish();
+    }
+  }
+
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { /* clipboard unavailable */ }
   }
 
   function downloadCSV() {
@@ -273,9 +372,14 @@
     var nameInput = $('member-name');
     var name = nameInput.value.trim();
     if (!name) { showToast('Please enter a member name.'); nameInput.focus(); return; }
+    var mode = $('member-mode') ? $('member-mode').value : 'punches';
     var list = loadMembers();
     try {
-      list.push(createMember(name, { punchesPerCard: Math.max(1, Math.round(num('member-punches', 10))) }));
+      list.push(createMember(name, {
+        punchesPerCard: Math.max(1, Math.round(num('member-punches', 10))),
+        mode: mode,
+        pointsPerReward: Math.max(1, Math.round(num('member-ppreward', 100)))
+      }));
     } catch (e) {
       showToast('Could not add member.');
       return;
@@ -283,7 +387,54 @@
     saveMembers(list);
     nameInput.value = '';
     renderMembers();
+    showToast(name + ' joined the ' + (mode === 'points' ? 'points' : 'punch-card') + ' program.');
   });
+
+  // Show the points-per-reward field only when the points program is selected.
+  var modeSel = $('member-mode');
+  if (modeSel) {
+    var pprField = $('member-ppreward-wrap');
+    var syncMode = function () {
+      var isPts = modeSel.value === 'points';
+      if (pprField) pprField.style.display = isPts ? '' : 'none';
+      var punchesField = $('member-punches-wrap');
+      if (punchesField) punchesField.style.display = isPts ? 'none' : '';
+    };
+    modeSel.addEventListener('change', syncMode);
+    syncMode();
+  }
+
+  // CSV roster import: name[,punches_per_card] header or one name per line.
+  var importInput = $('member-import-file');
+  if (importInput) {
+    $('member-import-btn').addEventListener('click', function () { importInput.click(); });
+    importInput.addEventListener('change', function () {
+      var file = importInput.files && importInput.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var res = membersFromCSV(reader.result);
+          if (!res.members.length) {
+            showToast('No member names found in that file.');
+            return;
+          }
+          var list = loadMembers();
+          var before = list.length;
+          res.members.forEach(function (m) { list.push(m); });
+          saveMembers(list);
+          renderMembers();
+          showToast('Imported ' + (list.length - before) + ' member' +
+            (list.length - before === 1 ? '' : 's') +
+            (res.skipped ? ' (' + res.skipped + ' blank rows skipped)' : '') + '.');
+        } catch (e) {
+          showToast('Could not import that file.');
+        }
+        importInput.value = '';
+      };
+      reader.readAsText(file);
+    });
+  }
 
   $('member-search').addEventListener('input', function () {
     memberSearch = $('member-search').value;

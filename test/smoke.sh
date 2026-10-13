@@ -33,8 +33,8 @@ pass "node --check js/app.js"
 node <<'EOF' || fail "logic.js module exports"
 const L = require('./js/logic.js');
 const fns = ['recommendProgram','calculateEconomics','breakEvenLift','createMember',
-  'logVisit','rewardsEarned','rewardsAvailable','redeemReward','searchMembers',
-  'sortMembers','membersToCSV','punchCardSpec','normalizeType','fmtMoney',
+  'logVisit','logPurchase','rewardsEarned','rewardsAvailable','redeemReward','searchMembers',
+  'sortMembers','membersToCSV','membersFromCSV','winBackMessage','punchCardSpec','normalizeType','fmtMoney',
   'daysSinceVisit','atRiskMembers','segmentMember','segmentCounts','visitsToNextReward'];
 for (const f of fns) if (typeof L[f] !== 'function') { console.error('missing fn: ' + f); process.exit(1); }
 for (const t of ['STRUCTURES','BUSINESS_TYPES','RECOMMENDATIONS']) if (!L[t]) { console.error('missing table: ' + t); process.exit(1); }
@@ -326,6 +326,77 @@ p = L.visitsToNextReward(m);
 if (p.toGo !== 0 || p.pct !== 0) { console.error('reward earned: ' + JSON.stringify(p)); process.exit(1); }
 EOF
 pass "visitsToNextReward: 0/10 -> 4/10 -> reward earned"
+
+# 21. points mode: earn per dollar, redeem deducts, progress is points-based
+node <<'EOF' || fail "points mode"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Points Pat', { mode: 'points', pointsPerDollar: 2, pointsPerReward: 100 });
+if (m.mode !== 'points' || m.points !== 0) { console.error('mode: ' + JSON.stringify(m)); process.exit(1); }
+let r = L.logPurchase(m, 30); // 60 pts
+if (r.points !== 60 || r.pointsEarned !== 60 || L.rewardsEarned(m) !== 0) { console.error('p1: ' + JSON.stringify(r)); process.exit(1); }
+r = L.logPurchase(m, 25); // 110 pts -> 1 reward
+if (!r.rewardEarnedNow || L.rewardsAvailable(m) !== 1) { console.error('p2: ' + JSON.stringify(r)); process.exit(1); }
+L.redeemReward(m);
+if (m.points !== 10 || L.rewardsAvailable(m) !== 0 || m.redeemed !== 1) { console.error('redeem: ' + m.points); process.exit(1); }
+const prog = L.visitsToNextReward(m);
+if (!prog.points || prog.perCard !== 100 || prog.toGo !== 90) { console.error('prog: ' + JSON.stringify(prog)); process.exit(1); }
+// errors: punch member, bad spend
+const punchy = L.createMember('Punchy', { punchesPerCard: 8 });
+try { L.logPurchase(punchy, 10); console.error('should throw on punch member'); process.exit(1); } catch (e) {}
+try { L.logPurchase(m, 0); console.error('should throw on zero spend'); process.exit(1); } catch (e) {}
+try { L.logPurchase(m, 'abc'); console.error('should throw on NaN spend'); process.exit(1); } catch (e) {}
+// punch mode unchanged
+for (let i = 0; i < 8; i++) L.logVisit(punchy);
+if (L.rewardsEarned(punchy) !== 1) { console.error('punch regression'); process.exit(1); }
+EOF
+pass "points mode: earn/redeem/deduct + punch mode unchanged"
+
+# 22. winBackMessage: personalized nudge with offer + progress hook
+node <<'EOF' || fail "winBackMessage"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Maria Lopez', { punchesPerCard: 10 });
+for (let i = 0; i < 7; i++) L.logVisit(m);
+const msg = L.winBackMessage(m, 45, '10% off your next visit', 'Acme Coffee');
+if (msg.indexOf('Hi Maria') !== 0) { console.error('greeting: ' + msg); process.exit(1); }
+if (msg.indexOf('45 days') === -1 || msg.indexOf('10% off your next visit') === -1) { console.error('days/offer: ' + msg); process.exit(1); }
+if (msg.indexOf('3 visits away') === -1) { console.error('progress hook: ' + msg); process.exit(1); }
+if (msg.indexOf('Acme Coffee') === -1) { console.error('sign-off: ' + msg); process.exit(1); }
+const pts = L.createMember('Pat Points', { mode: 'points', pointsPerReward: 100 });
+L.logPurchase(pts, 40);
+const msg2 = L.winBackMessage(pts, 31, '', '');
+if (msg2.indexOf('60 points away') === -1) { console.error('points hook: ' + msg2); process.exit(1); }
+if (msg2.indexOf('a little thank-you') === -1) { console.error('default offer: ' + msg2); process.exit(1); }
+EOF
+pass "winBackMessage: personalized nudge with offer + progress hook"
+
+# 23. membersFromCSV: header row or plain names, blanks skipped
+node <<'EOF' || fail "membersFromCSV"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+let r = L.membersFromCSV('name,punches_per_card\nAmy,5\n\nBob\n,,\n');
+if (r.members.length !== 2 || r.skipped !== 2) { console.error('header: ' + JSON.stringify(r)); process.exit(1); }
+if (r.members[0].name !== 'Amy' || r.members[0].punchesPerCard !== 5) { console.error('amy: ' + JSON.stringify(r.members[0])); process.exit(1); }
+if (r.members[1].punchesPerCard !== 10) { console.error('default punches'); process.exit(1); }
+r = L.membersFromCSV('Amy\nBob\n');
+if (r.members.length !== 2 || r.skipped !== 0) { console.error('plain: ' + JSON.stringify(r)); process.exit(1); }
+r = L.membersFromCSV('');
+if (r.members.length !== 0) { console.error('empty'); process.exit(1); }
+r = L.membersFromCSV('name,punches\n"Amy, A.",7\n');
+if (r.members[0].name !== 'Amy, A.' || r.members[0].punchesPerCard !== 7) { console.error('quoted: ' + JSON.stringify(r.members[0])); process.exit(1); }
+EOF
+pass "membersFromCSV: header + plain-name formats, blanks skipped"
+
+# 24. index.html has the new member controls
+for id in member-mode member-ppreward member-import-btn member-import-file; do
+  if grep -q "id=\"$id\"" index.html; then pass "index.html has #$id"; else fail "index.html missing #$id"; fi
+done
+
+# 25. app.js wires points purchases, nudge composer, CSV import
+for needle in logPurchase purchase-btn winBackMessage nudge-copy membersFromCSV member-import-btn copyText; do
+  if grep -q "$needle" js/app.js; then pass "app.js wires $needle"; else fail "app.js missing $needle"; fi
+done
 
 echo "---"
 echo "smoke: $PASS passed, $FAIL failed"

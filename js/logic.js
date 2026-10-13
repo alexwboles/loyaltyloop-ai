@@ -361,21 +361,34 @@ function createMember(name, opts) {
   const clean = String(name == null ? '' : name).trim();
   if (!clean) throw new Error('createMember: name is required');
   const punchesPerCard = Math.max(1, Math.round(toNum(opts.punchesPerCard, 10)));
+  const mode = opts.mode === 'points' ? 'points' : 'punches';
   _memberSeq += 1;
   return {
     id: opts.id != null ? String(opts.id) : 'm_' + _memberSeq + '_' + Date.now().toString(36),
     name: clean,
+    mode: mode, // 'punches' = buy-N-get-1 card; 'points' = earn per dollar spent
     visits: 0,
     punchesPerCard: punchesPerCard,
+    points: 0, // points-mode balance
+    pointsPerDollar: Math.max(0.01, toNum(opts.pointsPerDollar, 1)),
+    pointsPerReward: Math.max(1, Math.round(toNum(opts.pointsPerReward, 100))),
     redeemed: 0,       // rewards the member has cashed in
     lastVisitAt: null, // ISO string of the most recent logged visit
     joinedAt: new Date().toISOString()
   };
 }
 
-/* Number of full rewards a member has earned: floor(visits / punchesPerCard). */
+/* Number of full rewards a member has earned.
+ * Punch mode: floor(visits / punchesPerCard).
+ * Points mode: floor(points / pointsPerReward). */
 function rewardsEarned(member) {
-  if (!member || typeof member.visits !== 'number' || !member.punchesPerCard) return 0;
+  if (!member || typeof member.visits !== 'number') return 0;
+  if (member.mode === 'points') {
+    const per = Math.max(1, Math.round(toNum(member.pointsPerReward, 100)));
+    const pts = Math.max(0, toNum(member.points, 0));
+    return Math.floor(pts / per);
+  }
+  if (!member.punchesPerCard) return 0;
   return Math.floor(member.visits / member.punchesPerCard);
 }
 
@@ -386,13 +399,18 @@ function rewardsAvailable(member) {
   return Math.max(0, earned - redeemed);
 }
 
-/* Cash in one reward. Mutates the member. Throws when none are available. */
+/* Cash in one reward. Mutates the member. Throws when none are available.
+ * Points mode also deducts the reward's point cost from the balance. */
 function redeemReward(member) {
   if (!member || typeof member.visits !== 'number') {
     throw new Error('redeemReward: invalid member object');
   }
   if (rewardsAvailable(member) < 1) {
     throw new Error('redeemReward: no rewards available to redeem');
+  }
+  if (member.mode === 'points') {
+    const per = Math.max(1, Math.round(toNum(member.pointsPerReward, 100)));
+    member.points = Math.max(0, toNum(member.points, 0) - per);
   }
   member.redeemed = (Number.isFinite(Number(member.redeemed)) ? Number(member.redeemed) : 0) + 1;
   return {
@@ -416,6 +434,35 @@ function logVisit(member, atISO) {
     member: member,
     visits: member.visits,
     lastVisitAt: member.lastVisitAt,
+    rewardEarnedNow: after > before,
+    rewardsEarned: after
+  };
+}
+
+/* Log a purchase for a points-mode member: counts as a visit AND earns
+ * pointsPerDollar points per dollar spent. Throws on bad member or spend. */
+function logPurchase(member, spend, atISO) {
+  if (!member || typeof member.visits !== 'number') {
+    throw new Error('logPurchase: invalid member object');
+  }
+  const amount = toNum(spend, NaN);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('logPurchase: spend must be a positive number');
+  }
+  if (member.mode !== 'points') {
+    throw new Error('logPurchase: member is not on a points program');
+  }
+  const before = rewardsEarned(member);
+  const earned = Math.round(amount * Math.max(0.01, toNum(member.pointsPerDollar, 1)) * 100) / 100;
+  member.points = round2(toNum(member.points, 0) + earned);
+  member.visits += 1;
+  member.lastVisitAt = atISO || new Date().toISOString();
+  const after = rewardsEarned(member);
+  return {
+    member: member,
+    spend: round2(amount),
+    pointsEarned: earned,
+    points: member.points,
     rewardEarnedNow: after > before,
     rewardsEarned: after
   };
@@ -515,15 +562,101 @@ function segmentCounts(list, refISO) {
   return counts;
 }
 
-/* Progress toward the next free reward: {perCard, intoCard, toGo, pct}. */
+/* Progress toward the next free reward: {perCard, intoCard, toGo, pct}.
+ * Punch mode: punches on the current card. Points mode: points toward the
+ * next reward's point cost. */
 function visitsToNextReward(member) {
-  var per = Math.max(1, Math.round(toNum(member && member.punchesPerCard, 10)));
+  if (member && member.mode === 'points') {
+    var per = Math.max(1, Math.round(toNum(member.pointsPerReward, 100)));
+    var pts = Math.max(0, toNum(member.points, 0));
+    var into = Math.floor(pts) % per;
+    var toGo = into === 0 && pts > 0 ? 0 : per - into;
+    return { perCard: per, visits: Math.max(0, Math.floor(toNum(member.visits, 0))),
+             intoCard: into, toGo: toGo, pct: Math.round((into / per) * 100),
+             points: true };
+  }
+  var perCard = Math.max(1, Math.round(toNum(member && member.punchesPerCard, 10)));
   var visits = Math.max(0, Math.floor(toNum(member && member.visits, 0)));
-  var into = visits % per;
-  var toGo = into === 0 ? per : per - into; // fresh card still needs a full card
-  if (visits > 0 && into === 0) toGo = 0;  // reward just earned
-  return { perCard: per, visits: visits, intoCard: into, toGo: toGo,
-           pct: Math.round((into / per) * 100) };
+  var intoCard = visits % perCard;
+  var toGo2 = intoCard === 0 ? perCard : perCard - intoCard; // fresh card still needs a full card
+  if (visits > 0 && intoCard === 0) toGo2 = 0;  // reward just earned
+  return { perCard: perCard, visits: visits, intoCard: intoCard, toGo: toGo2,
+           pct: Math.round((intoCard / perCard) * 100), points: false };
+}
+
+/* Win-back nudge: a ready-to-send personal message for a lapsed member.
+ * offerText is the incentive ("10% off your next visit"); businessName signs it. */
+function winBackMessage(member, daysSince, offerText, businessName) {
+  var name = String((member && member.name) || 'there').trim() || 'there';
+  var first = name.split(/\s+/)[0];
+  var days = Math.max(1, Math.round(toNum(daysSince, 30)));
+  var offer = String(offerText == null ? '' : offerText).trim() || 'a little thank-you on your next visit';
+  var biz = String(businessName == null ? '' : businessName).trim() || 'us';
+  var prog = visitsToNextReward(member);
+  var hook = '';
+  if (member && member.mode === 'points' && prog.toGo > 0) {
+    hook = ' You\'re only ' + prog.toGo + ' points away from a free reward — don\'t let them go to waste.';
+  } else if (prog.toGo > 0 && (!member || member.mode !== 'points')) {
+    hook = ' You\'re only ' + prog.toGo + ' visit' + (prog.toGo === 1 ? '' : 's') + ' away from a free reward.';
+  }
+  return 'Hi ' + first + ' — we haven\'t seen you in ' + days + ' days and we miss you!' +
+    ' Here\'s ' + offer + '.' + hook + ' Hope to see you soon — ' + biz + '.';
+}
+
+/* Parse a member CSV into createMember-ready objects (not persisted).
+ * Accepts a header row (name[,punches_per_card] / name[,punches]) or plain
+ * one-name-per-line files. Quoted fields (commas, escaped "") are handled.
+ * Blank lines are skipped; the summary counts them. */
+function splitCsvRow(line) {
+  var cells = [];
+  var cur = '';
+  var inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ',') {
+      cells.push(cur); cur = '';
+    } else cur += ch;
+  }
+  cells.push(cur);
+  return cells.map(function (c) { return c.trim(); });
+}
+
+function membersFromCSV(text) {
+  var lines = String(text == null ? '' : text).replace(/^\uFEFF/, '').split(/\r?\n/);
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  var members = [];
+  var skipped = 0;
+  var start = 0;
+  var punchesIdx = -1;
+  if (lines.length) {
+    var first = splitCsvRow(lines[0]).map(function (c) { return c.toLowerCase(); });
+    if (first[0] === 'name') {
+      start = 1;
+      punchesIdx = first.indexOf('punches_per_card') !== -1 ? first.indexOf('punches_per_card')
+        : first.indexOf('punches');
+    }
+  }
+  for (var i = start; i < lines.length; i++) {
+    if (!lines[i].trim()) { skipped++; continue; }
+    var cells = splitCsvRow(lines[i]);
+    var name = cells[0] || '';
+    if (!name) { skipped++; continue; }
+    var opts = {};
+    if (punchesIdx !== -1 && cells[punchesIdx]) {
+      opts.punchesPerCard = Math.max(1, Math.round(toNum(cells[punchesIdx], 10)));
+    }
+    try {
+      members.push(createMember(name, opts));
+    } catch (e) { skipped++; }
+  }
+  return { members: members, skipped: skipped };
 }
 
 /* ------------------------------------------------------------------ */
@@ -548,6 +681,9 @@ if (typeof module !== 'undefined' && module.exports) {
     rewardsAvailable: rewardsAvailable,
     redeemReward: redeemReward,
     logVisit: logVisit,
+    logPurchase: logPurchase,
+    winBackMessage: winBackMessage,
+    membersFromCSV: membersFromCSV,
     searchMembers: searchMembers,
     sortMembers: sortMembers,
     membersToCSV: membersToCSV,
