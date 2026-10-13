@@ -398,6 +398,40 @@ for needle in logPurchase purchase-btn winBackMessage nudge-copy membersFromCSV 
   if grep -q "$needle" js/app.js; then pass "app.js wires $needle"; else fail "app.js missing $needle"; fi
 done
 
+
+# 26. index.html has the overview dashboard elements
+for id in topbar-eyebrow topbar-title ov-members ov-visits ov-earned ov-redeemed ov-top ov-mix ov-activity ov-empty ov-goto-winback ov-add-first; do
+  if grep -q "id=\"$id\"" index.html; then pass "index.html has #$id"; else fail "index.html missing #$id"; fi
+done
+
+# 27. app.js renders the overview dashboard
+for needle in renderOverview ov-members-sub ov-new ov-risk act-row top-row segmentCounts atRiskMembers relTime; do
+  if grep -q "$needle" js/app.js; then pass "app.js wires $needle"; else fail "app.js missing $needle"; fi
+done
+
+# 28. overview aggregate math (the numbers the dashboard shows)
+node <<'NODEEOF' || fail "overview aggregates"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const mk = (name, visits, daysAgo, redeem) => {
+  const m = L.createMember(name, { punchesPerCard: 10 });
+  for (let i = 0; i < visits; i++) L.logVisit(m, new Date(Date.now() - (daysAgo + i) * 864e5).toISOString());
+  if (redeem) L.redeemReward(m);
+  return m;
+};
+const all = [mk('Ava', 23, 2, true), mk('Ben', 11, 9, false), mk('Cy', 2, 45, false)];
+const visits = all.reduce((s, m) => s + m.visits, 0);
+if (visits !== 36) { console.error('visits=' + visits); process.exit(1); }
+const earned = all.reduce((s, m) => s + L.rewardsEarned(m), 0);
+if (earned !== 3) { console.error('earned=' + earned); process.exit(1); }
+const unredeemed = all.reduce((s, m) => s + L.rewardsAvailable(m), 0);
+if (unredeemed !== 2) { console.error('unredeemed=' + unredeemed); process.exit(1); }
+const top = L.sortMembers(all.slice(), 'visits');
+if (top[0].name !== 'Ava' || top[2].name !== 'Cy') { console.error('top sort'); process.exit(1); }
+if (L.atRiskMembers(all, 30).length !== 1) { console.error('at-risk'); process.exit(1); }
+NODEEOF
+pass "overview aggregates: visits, rewards, top-member sort, at-risk count"
+
 echo "---"
 echo "smoke: $PASS passed, $FAIL failed"
 exit "$FAIL"

@@ -19,18 +19,52 @@
     var v = parseFloat($(id).value);
     return isFinite(v) ? v : fallback;
   }
+  function fmtLastVisit(iso) {
+    if (!iso) return 'no visits yet';
+    try {
+      var d = new Date(iso);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return 'recently'; }
+  }
+  function relTime(iso) {
+    if (!iso) return 'never';
+    var ms = Date.now() - new Date(iso).getTime();
+    if (!(ms >= 0)) return 'just now';
+    var mins = Math.floor(ms / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + ' hr ago';
+    var days = Math.floor(hrs / 24);
+    if (days < 30) return days + (days === 1 ? ' day ago' : ' days ago');
+    var months = Math.floor(days / 30);
+    return months + (months === 1 ? ' month ago' : ' months ago');
+  }
 
   /* ---------- tabs ---------- */
   var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.tab-btn'));
   var sections = Array.prototype.slice.call(document.querySelectorAll('.tab-section'));
+  var TAB_META = {
+    overview: { eyebrow: 'Loyalty dashboard', title: 'Good morning, boss.' },
+    program: { eyebrow: 'Program studio', title: 'Design your program' },
+    economics: { eyebrow: 'Program studio', title: 'Check the economics' },
+    members: { eyebrow: 'Members', title: 'Your regulars' },
+    print: { eyebrow: 'Print & hand out', title: 'Cards on the counter' }
+  };
 
   function showTab(name) {
     tabButtons.forEach(function (b) { b.classList.toggle('active', b.dataset.tab === name); });
     sections.forEach(function (s) { s.classList.toggle('active', s.id === 'section-' + name); });
+    var meta = TAB_META[name] || TAB_META.overview;
+    var eb = $('topbar-eyebrow'), tt = $('topbar-title');
+    if (eb) eb.textContent = meta.eyebrow;
+    if (tt) tt.textContent = meta.title;
+    if (name === 'overview') renderOverview();
   }
   tabButtons.forEach(function (b) {
     b.addEventListener('click', function () { showTab(b.dataset.tab); });
   });
+  window.__showTab = showTab;
 
   /* ---------- 1. recommender ---------- */
   function renderRecommender() {
@@ -46,9 +80,7 @@
             '<dt>How they redeem</dt><dd>' + esc(rec.redeem) + '</dd></dl>';
     html += '</div>';
     $('rec-result').innerHTML = html;
-    // remember the suggested card size for the printable tab
-    var rec2 = rec;
-    window.__lastRec = rec2;
+    window.__lastRec = rec;
   }
   $('rec-btn').addEventListener('click', renderRecommender);
 
@@ -129,7 +161,6 @@
   }
 
   function stampStrip(m) {
-    // tiny punch-card: filled circles = punches on the member's current card
     var per = Math.max(1, m.punchesPerCard || 10);
     var filled = m.visits % per;
     var cells = '';
@@ -143,14 +174,94 @@
   var memberSearch = '';
   var memberSort = 'newest';
 
-  function fmtLastVisit(iso) {
-    if (!iso) return 'no visits yet';
-    try {
-      var d = new Date(iso);
-      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (e) { return 'recently'; }
+  /* ---------- overview dashboard (Square-Loyalty style) ---------- */
+  function renderOverview() {
+    var all = loadMembers();
+    var empty = $('ov-empty');
+    var hasData = all.length > 0;
+    empty.style.display = hasData ? 'none' : 'block';
+
+    var totalVisits = 0, earned = 0, redeemed = 0, unredeemed = 0;
+    var newCount = 0;
+    var cutoff = Date.now() - 30 * 86400000;
+    all.forEach(function (m) {
+      totalVisits += m.visits || 0;
+      earned += rewardsEarned(m);
+      redeemed += Number.isFinite(Number(m.redeemed)) ? Number(m.redeemed) : 0;
+      unredeemed += rewardsAvailable(m);
+      try {
+        if (m.joinedAt && new Date(m.joinedAt).getTime() >= cutoff) newCount++;
+      } catch (e) {}
+    });
+
+    $('ov-members').textContent = String(all.length);
+    $('ov-members-sub').textContent = newCount ? '+' + newCount + ' in the last 30 days' : 'enrolled since day one';
+    $('ov-visits').textContent = String(totalVisits);
+    $('ov-visits-sub').textContent = all.length ? 'avg ' + (totalVisits / all.length).toFixed(1) + ' per member' : '';
+    $('ov-earned').textContent = String(earned);
+    $('ov-earned-sub').textContent = unredeemed ? unredeemed + ' still unredeemed' : (earned ? 'all redeemed — nice' : '');
+    $('ov-redeemed').textContent = String(redeemed);
+    $('ov-redeemed-sub').textContent = earned ? Math.round((redeemed / earned) * 100) + '% redemption rate' : '';
+
+    // top members
+    var top = sortMembers(all.slice(), 'visits').slice(0, 5);
+    var maxV = top.length ? (top[0].visits || 0) : 0;
+    $('ov-top').innerHTML = top.length ? top.map(function (m, i) {
+      var pct = maxV ? Math.round(((m.visits || 0) / maxV) * 100) : 0;
+      return '<div class="top-row' + (i === 0 ? ' first' : '') + '">' +
+        '<span class="top-rank">' + (i + 1) + '</span>' +
+        '<span class="top-name"><strong>' + esc(m.name) + '</strong>' +
+        '<span>' + (m.mode === 'points' ? Math.floor(Math.max(0, Number(m.points) || 0)) + ' pts' : (m.visits % Math.max(1, m.punchesPerCard || 10)) + '/' + Math.max(1, m.punchesPerCard || 10) + ' punches') + ' · last visit ' + esc(relTime(m.lastVisitAt)) + '</span></span>' +
+        '<span class="top-bar"><i style="width:' + pct + '%"></i></span>' +
+        '<span class="top-count">' + (m.visits || 0) + '</span>' +
+      '</div>';
+    }).join('') : '<p class="empty-note">Your top regulars will appear here.</p>';
+
+    // member mix
+    var c = segmentCounts(all);
+    var parts = ['champion', 'regular', 'occasional', 'new', 'lapsed']
+      .filter(function (k) { return c[k] > 0; })
+      .map(function (k) { return '<span class="seg-badge seg-' + k + '">' + c[k] + ' ' + k + '</span>'; });
+    $('ov-mix').innerHTML = parts.length ? parts.join('') : '<p class="empty-note">Segments appear once members join.</p>';
+
+    $('ov-new').textContent = String(newCount);
+    $('ov-risk').textContent = String(atRiskMembers(all, 30).length);
+
+    // recent activity: latest visits across members
+    var acts = [];
+    all.forEach(function (m) {
+      if (m.lastVisitAt) {
+        acts.push({
+          when: m.lastVisitAt,
+          what: '<strong>' + esc(m.name) + '</strong> checked in — visit #' + (m.visits || 0),
+          tag: 'visit', tagLabel: 'visit'
+        });
+        var avail = rewardsAvailable(m);
+        if (avail > 0) {
+          acts.push({
+            when: m.lastVisitAt,
+            what: '<strong>' + esc(m.name) + '</strong> has ' + avail + ' reward' + (avail === 1 ? '' : 's') + ' waiting',
+            tag: 'reward', tagLabel: 'reward'
+          });
+        }
+      }
+    });
+    acts.sort(function (a, b) { return new Date(b.when) - new Date(a.when); });
+    $('ov-activity').innerHTML = acts.length ? acts.slice(0, 8).map(function (a) {
+      return '<div class="act-row"><span class="act-when">' + esc(fmtLastVisit(a.when)) + '</span>' +
+        '<span class="act-what">' + a.what + '</span>' +
+        '<span class="act-tag ' + a.tag + '">' + a.tagLabel + '</span></div>';
+    }).join('') : '<p class="empty-note">Visits you stamp will stream in here.</p>';
+
+    // member count in nav
+    var count = $('member-count');
+    if (count) count.textContent = all.length ? String(all.length) : '';
   }
 
+  $('ov-goto-winback').addEventListener('click', function () { showTab('members'); });
+  $('ov-add-first').addEventListener('click', function () { showTab('members'); });
+
+  /* ---------- member list ---------- */
   function renderMembers() {
     var all = loadMembers();
     var box = $('member-list');
@@ -194,6 +305,7 @@
         '<span class="reward-progress" title="' + esc(rpTitle) + '">' +
         '<span class="rp-track"><span class="rp-fill" style="width:' + prog.pct + '%"></span></span>' +
         '<span class="rp-label">' + esc(rpLabel) + '</span></span>' +
+        '<span class="member-actions">' +
         (isPoints
           ? '<span class="purchase-wrap"><input class="purchase-amt" type="number" min="0" step="0.01" placeholder="Spend $" ' +
             'aria-label="Purchase amount for ' + esc(m.name) + '"><button class="btn small purchase-btn" type="button">Log purchase</button></span>'
@@ -202,7 +314,7 @@
         ' title="' + (available < 1 ? 'No rewards to redeem yet' : available + ' reward(s) ready to redeem') + '">' +
         'Redeem' + (available > 0 ? ' (' + available + ')' : '') + '</button>' +
         '<button class="btn small secondary remove-btn" type="button">Remove</button>' +
-      '</div>';
+        '</span></div>';
     }).join('');
     box.innerHTML = html + renderWinBack(all);
     wireNudgeButtons(box);
@@ -390,7 +502,6 @@
     showToast(name + ' joined the ' + (mode === 'points' ? 'points' : 'punch-card') + ' program.');
   });
 
-  // Show the points-per-reward field only when the points program is selected.
   var modeSel = $('member-mode');
   if (modeSel) {
     var pprField = $('member-ppreward-wrap');
@@ -404,7 +515,6 @@
     syncMode();
   }
 
-  // CSV roster import: name[,punches_per_card] header or one name per line.
   var importInput = $('member-import-file');
   if (importInput) {
     $('member-import-btn').addEventListener('click', function () { importInput.click(); });
@@ -450,7 +560,6 @@
   });
 
   /* ---------- boot ---------- */
-  // populate business type select from the data table (no duplication)
   (function populateTypes() {
     var sel = $('biz-type');
     BUSINESS_TYPES.forEach(function (t) {
@@ -461,7 +570,6 @@
     });
   })();
 
-  // sensible calculator defaults so first click shows something real
   $('ec-ticket').value = '6.50';
   $('ec-visits').value = '8';
   $('ec-margin').value = '65';
@@ -471,6 +579,6 @@
   $('pc-punches').value = '10';
   $('pc-reward').value = 'Free drink';
 
-  showTab('recommend');
+  showTab('overview');
   renderMembers();
 })();

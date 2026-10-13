@@ -279,6 +279,33 @@ if (csv.split('\n').length !== 4 || csv.indexOf('Amy Alvarez') === -1) { console
 EOF
 pass "flow 15: CSV import -> working members -> roster export"
 
+
+# Flow 16: merchant opens the dashboard — every KPI derives from member data
+node <<'NODEEOF' || fail "flow 16: overview dashboard journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+// a morning at the register: two new members, a stack of visits, one redemption
+const list = [L.createMember('Dana', { punchesPerCard: 10 }), L.createMember('Eli', { mode: 'points', pointsPerReward: 100 })];
+const dana = list[0];
+const oneMinAgo = new Date(Date.now() - 60000).toISOString();
+for (let i = 0; i < 10; i++) L.logVisit(dana, oneMinAgo);
+if (L.rewardsAvailable(dana) !== 1) { console.error('dana reward'); process.exit(1); }
+L.redeemReward(dana);
+const eli = list[1];
+L.logPurchase(eli, 120); // logged now — newer than Dana's visits
+if (Math.floor(eli.points) !== 120) { console.error('eli points=' + eli.points); process.exit(1); }
+// dashboard KPIs
+const earned = list.reduce((s, m) => s + L.rewardsEarned(m), 0);
+const redeemed = list.reduce((s, m) => s + (Number.isFinite(+m.redeemed) ? +m.redeemed : 0), 0);
+if (earned !== 2 || redeemed !== 1) { console.error('kpi: ' + earned + '/' + redeemed); process.exit(1); }
+const top = L.sortMembers(list.slice(), 'visits');
+if (top[0].name !== 'Dana') { console.error('top'); process.exit(1); }
+// recent activity order: Eli's purchase is the newest entry
+const acts = list.filter(m => m.lastVisitAt).sort((a, b) => new Date(b.lastVisitAt) - new Date(a.lastVisitAt));
+if (acts[0].name !== 'Eli' || acts[1].name !== 'Dana') { console.error('activity'); process.exit(1); }
+NODEEOF
+pass "flow 16: overview dashboard journey (KPIs, top member, activity order)"
+
 echo "---"
 echo "e2e: $PASS passed, $FAIL failed"
 exit "$FAIL"

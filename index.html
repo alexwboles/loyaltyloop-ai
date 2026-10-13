@@ -1,165 +1,227 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LoyaltyLoop AI — Customer Loyalty Program Designer</title>
-  <meta name="description" content="Design a profitable customer loyalty program for your local business. Free, local-first, no signup.">
-  <link rel="stylesheet" href="css/style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoyaltyLoop AI — customer loyalty, run like the big chains</title>
+<meta name="description" content="Design a profitable customer loyalty program for your local business: dashboard, program studio, member tracker, printable cards. Free, local-first, no signup.">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<div class="page-top no-print">
-  <header class="app-header">
-    <div class="logo" aria-hidden="true">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+<div class="shell">
+  <aside class="sidebar no-print" aria-label="Primary">
+    <div class="side-brand">
+      <span class="stamp" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      </span>
+      <span class="side-brand-text"><strong>LoyaltyLoop</strong><em>AI · loyalty OS for Main Street</em></span>
     </div>
-    <div>
-      <h1>LoyaltyLoop <span class="ai-chip">AI</span></h1>
-      <p>Design a loyalty program your regulars will actually keep in their wallet. Free, local-first — your data never leaves this browser.</p>
-    </div>
-    <nav class="tab-bar" aria-label="Sections">
-      <button class="tab-btn active" data-tab="recommend" type="button">Program</button>
-      <button class="tab-btn" data-tab="economics" type="button">Economics</button>
-      <button class="tab-btn" data-tab="print" type="button">Print cards</button>
-      <button class="tab-btn" data-tab="members" type="button">Members <span class="tab-count" id="member-count"></span></button>
+    <nav class="side-nav" aria-label="Sections">
+      <button class="tab-btn active" data-tab="overview" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z"/></svg>
+        Overview
+      </button>
+      <button class="tab-btn" data-tab="program" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M4 10h16M10 10v9"/></svg>
+        Program studio
+      </button>
+      <button class="tab-btn" data-tab="economics" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20"/><path d="M8 6h8M8 11h2M14 11h2M8 15h2M14 15h2M8 19h2M14 19h2"/></svg>
+        Economics
+      </button>
+      <button class="tab-btn" data-tab="members" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17.5" cy="9.5" r="2.5"/><path d="M16 14.5c3.2.3 5.5 2.4 5.5 5.5"/></svg>
+        Members <span class="tab-count" id="member-count"></span>
+      </button>
+      <button class="tab-btn" data-tab="print" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="9"/><path d="M6 15h12v6H6z"/></svg>
+        Print cards
+      </button>
     </nav>
-  </header>
-  <div class="hero-strip" aria-hidden="true">
-    <span class="punch-mini"></span><span class="punch-mini"></span><span class="punch-mini"></span>
-    <span class="punch-mini filled"></span><span class="punch-mini filled"></span>
-    <span class="punch-mini filled"></span><span class="punch-mini"></span><span class="punch-mini"></span>
+    <div class="side-foot">100% free · local-first<br>your data never leaves this browser</div>
+  </aside>
+
+  <div class="maincol">
+    <header class="topbar no-print">
+      <p class="topbar-eyebrow" id="topbar-eyebrow">Loyalty dashboard</p>
+      <h1 class="topbar-title" id="topbar-title">Good morning, boss.</h1>
+    </header>
+
+    <main>
+      <!-- ============ OVERVIEW ============ -->
+      <section id="section-overview" class="tab-section active" aria-label="Overview dashboard">
+        <div class="kpis">
+          <div class="kpi"><span class="kpi-num" id="ov-members">0</span><span class="kpi-lbl">Members enrolled</span><span class="kpi-sub" id="ov-members-sub"></span></div>
+          <div class="kpi"><span class="kpi-num" id="ov-visits">0</span><span class="kpi-lbl">Visits logged</span><span class="kpi-sub" id="ov-visits-sub"></span></div>
+          <div class="kpi"><span class="kpi-num" id="ov-earned">0</span><span class="kpi-lbl">Rewards earned</span><span class="kpi-sub" id="ov-earned-sub"></span></div>
+          <div class="kpi"><span class="kpi-num" id="ov-redeemed">0</span><span class="kpi-lbl">Rewards redeemed</span><span class="kpi-sub" id="ov-redeemed-sub"></span></div>
+        </div>
+
+        <div class="ov-grid">
+          <div class="card">
+            <p class="kicker">Regulars</p>
+            <h2>Top members</h2>
+            <p class="lead">Your most loyal customers, ranked by visits.</p>
+            <div id="ov-top"></div>
+          </div>
+          <div class="card">
+            <p class="kicker">Pulse</p>
+            <h2>Member mix</h2>
+            <p class="lead">Champions, regulars, occasionals, new, lapsed.</p>
+            <div id="ov-mix" class="mix"></div>
+            <div class="ov-counts">
+              <div class="ov-count"><strong id="ov-new">0</strong><span>joined in the last 30 days</span></div>
+              <div class="ov-count"><strong id="ov-risk">0</strong><span>at risk — no visit in 30+ days</span></div>
+            </div>
+            <button class="btn secondary" id="ov-goto-winback" type="button">Open the win-back list</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="kicker">The register tape</p>
+          <h2>Recent activity</h2>
+          <p class="lead">Latest visits and rewards across the whole program.</p>
+          <div id="ov-activity"></div>
+        </div>
+
+        <div class="card empty-state-card" id="ov-empty" style="display:none">
+          <h2>No members yet</h2>
+          <p class="lead">Add your first member and this dashboard comes alive — KPIs, top regulars, and recent activity, all computed locally.</p>
+          <button class="btn" id="ov-add-first" type="button">Add your first member</button>
+        </div>
+      </section>
+
+      <!-- ============ PROGRAM STUDIO ============ -->
+      <section id="section-program" class="tab-section" aria-label="Program studio">
+        <div class="card">
+          <p class="kicker">Program studio</p>
+          <h2>What kind of loyalty fits your business?</h2>
+          <p class="lead">Choose your business type and we'll stamp out a recommended structure — punch card, points, or tiers — with earn &amp; redeem rules.</p>
+          <div class="inline-row">
+            <label class="field grow">Business type
+              <select id="biz-type"></select>
+            </label>
+            <button id="rec-btn" class="btn no-print" type="button">Recommend my program</button>
+          </div>
+          <div id="rec-result"></div>
+        </div>
+      </section>
+
+      <!-- ============ ECONOMICS ============ -->
+      <section id="section-economics" class="tab-section" aria-label="Reward economics">
+        <div class="card">
+          <p class="kicker">Program studio</p>
+          <h2>Will your rewards actually pay for themselves?</h2>
+          <p class="lead">Enter your numbers. We compute the monthly reward cost per member, the extra profit from increased visits, the net benefit, and the break-even visit lift.</p>
+          <div class="grid-2">
+            <label class="field">Average ticket ($)
+              <input id="ec-ticket" type="number" min="0" step="0.01" inputmode="decimal">
+            </label>
+            <label class="field">Visits / month per member
+              <input id="ec-visits" type="number" min="0" step="0.5" inputmode="decimal">
+            </label>
+            <label class="field">Gross margin (%)
+              <input id="ec-margin" type="number" min="0" max="100" step="1" inputmode="decimal">
+            </label>
+            <label class="field">Reward cost ($)
+              <small>What the free reward costs you (not its menu price).</small>
+              <input id="ec-cost" type="number" min="0" step="0.01" inputmode="decimal">
+            </label>
+            <label class="field">Reward every N visits
+              <input id="ec-everyn" type="number" min="1" step="1" inputmode="numeric">
+            </label>
+            <label class="field">Expected visit lift (%)
+              <small>How many more visits you expect members to make.</small>
+              <input id="ec-lift" type="number" min="0" step="1" inputmode="decimal">
+            </label>
+          </div>
+          <button id="ec-btn" class="btn no-print" type="button">Calculate economics</button>
+          <div id="ec-result"></div>
+        </div>
+      </section>
+
+      <!-- ============ MEMBERS ============ -->
+      <section id="section-members" class="tab-section" aria-label="Member tracker">
+        <div class="card">
+          <p class="kicker">Members</p>
+          <h2>Track members &amp; visits</h2>
+          <p class="lead">Stamp visits with one click. Rewards are counted automatically. Everything is saved in this browser (localStorage) — nothing is uploaded.</p>
+          <div class="grid-2 no-print">
+            <label class="field">Member name
+              <input id="member-name" type="text" placeholder="e.g. Maria Lopez" maxlength="80">
+            </label>
+            <label class="field">Program type
+              <select id="member-mode">
+                <option value="punches">Punch card — buy N, get 1 free</option>
+                <option value="points">Points — earn per dollar spent</option>
+              </select>
+            </label>
+          </div>
+          <div class="grid-2 no-print">
+            <label class="field" id="member-punches-wrap">Punches per reward card
+              <input id="member-punches" type="number" min="1" max="25" step="1" value="10" inputmode="numeric">
+            </label>
+            <label class="field" id="member-ppreward-wrap" style="display:none">Points per reward
+              <input id="member-ppreward" type="number" min="1" max="1000" step="1" value="100" inputmode="numeric">
+            </label>
+          </div>
+          <button id="member-add-btn" class="btn no-print" type="button">Add member</button>
+        </div>
+
+        <div class="card">
+          <div class="member-finder no-print">
+            <input id="member-search" type="search" placeholder="Search members by name…" aria-label="Search members">
+            <label class="sort-wrap">Sort
+              <select id="member-sort" aria-label="Sort members">
+                <option value="newest">Newest first</option>
+                <option value="name">Name A–Z</option>
+                <option value="visits">Most visits</option>
+              </select>
+            </label>
+            <button id="member-csv-btn" class="btn secondary small" type="button">Export CSV</button>
+            <button id="member-import-btn" class="btn secondary small" type="button">Import CSV</button>
+            <input id="member-import-file" type="file" accept=".csv,text/csv" style="display:none" aria-hidden="true">
+          </div>
+          <div id="member-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ PRINT CARDS ============ -->
+      <section id="section-print" class="tab-section" aria-label="Printable punch cards">
+        <div class="card">
+          <p class="kicker">Print &amp; hand out</p>
+          <h2>Print your punch cards &amp; signup sheet</h2>
+          <p class="lead">Type your business name, set the card size, and print. The printout hides all app chrome — just the card and the sheet.</p>
+          <div class="no-print">
+            <div class="grid-2">
+              <label class="field">Business name
+                <input id="pc-name" type="text" placeholder="e.g. Sunny Side Café" maxlength="60">
+              </label>
+              <label class="field">Reward for a full card
+                <input id="pc-reward" type="text" placeholder="e.g. Free drink" maxlength="60">
+              </label>
+              <label class="field">Punches per card
+                <input id="pc-punches" type="number" min="1" max="25" step="1" inputmode="numeric">
+              </label>
+            </div>
+            <div class="inline-row">
+              <button id="pc-btn" class="btn secondary" type="button">Preview</button>
+              <button id="pc-print" class="btn" type="button">Print card &amp; signup sheet</button>
+            </div>
+          </div>
+          <div id="print-area" class="print-sheet"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer no-print">
+      LoyaltyLoop AI · 100% free · local-first · zero API keys · no tracking
+    </footer>
   </div>
 </div>
 
-<main>
-  <!-- 1. Recommender -->
-  <section id="section-recommend" class="tab-section active" aria-label="Program recommender">
-    <div class="stepper no-print"><span class="step active">1</span><span class="step-line"></span><span class="step">2</span><span class="step-line"></span><span class="step">3</span><span class="step-line"></span><span class="step">4</span></div>
-    <div class="card">
-      <p class="kicker">Step 1 — Pick your program</p>
-      <h2>What kind of loyalty fits your business?</h2>
-      <p class="lead">Choose your business type and we'll stamp out a recommended structure — punch card, points, or tiers — with earn &amp; redeem rules.</p>
-      <div class="inline-row">
-        <label class="field grow">Business type
-          <select id="biz-type"></select>
-        </label>
-        <button id="rec-btn" class="btn no-print" type="button">Recommend my program</button>
-      </div>
-      <div id="rec-result"></div>
-    </div>
-  </section>
-
-  <!-- 2. Economics calculator -->
-  <section id="section-economics" class="tab-section" aria-label="Reward economics calculator">
-    <div class="card">
-      <p class="kicker">Step 2 — Check the math</p>
-      <h2>Will your rewards actually pay for themselves?</h2>
-      <p class="lead">Enter your numbers. We compute the monthly reward cost per member, the extra profit from increased visits, the net benefit, and the break-even visit lift.</p>
-      <div class="grid-2">
-        <label class="field">Average ticket ($)
-          <input id="ec-ticket" type="number" min="0" step="0.01" inputmode="decimal">
-        </label>
-        <label class="field">Visits / month per member
-          <input id="ec-visits" type="number" min="0" step="0.5" inputmode="decimal">
-        </label>
-        <label class="field">Gross margin (%)
-          <input id="ec-margin" type="number" min="0" max="100" step="1" inputmode="decimal">
-        </label>
-        <label class="field">Reward cost ($)
-          <small>What the free reward costs you (not its menu price).</small>
-          <input id="ec-cost" type="number" min="0" step="0.01" inputmode="decimal">
-        </label>
-        <label class="field">Reward every N visits
-          <input id="ec-everyn" type="number" min="1" step="1" inputmode="numeric">
-        </label>
-        <label class="field">Expected visit lift (%)
-          <small>How many more visits you expect members to make.</small>
-          <input id="ec-lift" type="number" min="0" step="1" inputmode="decimal">
-        </label>
-      </div>
-      <button id="ec-btn" class="btn no-print" type="button">Calculate economics</button>
-      <div id="ec-result"></div>
-    </div>
-  </section>
-
-  <!-- 3. Printable punch card + signup sheet -->
-  <section id="section-print" class="tab-section" aria-label="Printable punch card and signup sheet">
-    <div class="card">
-      <p class="kicker">Step 3 — Print &amp; hand out</p>
-      <h2>Print your punch cards &amp; signup sheet</h2>
-      <p class="lead">Type your business name, set the card size, and print. The printout hides all app chrome — just the card and the sheet.</p>
-      <div class="no-print">
-        <div class="grid-2">
-          <label class="field">Business name
-            <input id="pc-name" type="text" placeholder="e.g. Sunny Side Café" maxlength="60">
-          </label>
-          <label class="field">Reward for a full card
-            <input id="pc-reward" type="text" placeholder="e.g. Free drink" maxlength="60">
-          </label>
-          <label class="field">Punches per card
-            <input id="pc-punches" type="number" min="1" max="25" step="1" inputmode="numeric">
-          </label>
-        </div>
-        <div class="inline-row">
-          <button id="pc-btn" class="btn secondary" type="button">Preview</button>
-          <button id="pc-print" class="btn" type="button">Print card &amp; signup sheet</button>
-        </div>
-      </div>
-      <div id="print-area" class="print-sheet"></div>
-    </div>
-  </section>
-
-  <!-- 4. Member tracker -->
-  <section id="section-members" class="tab-section" aria-label="Member tracker">
-    <div class="card">
-      <p class="kicker">Step 4 — Keep them coming back</p>
-      <h2>Track members &amp; visits</h2>
-      <p class="lead">Stamp visits with one click. Rewards are counted automatically. Everything is saved in this browser (localStorage) — nothing is uploaded.</p>
-      <div class="grid-2 no-print">
-        <label class="field">Member name
-          <input id="member-name" type="text" placeholder="e.g. Maria Lopez" maxlength="80">
-        </label>
-        <label class="field">Program type
-          <select id="member-mode">
-            <option value="punches">Punch card — buy N, get 1 free</option>
-            <option value="points">Points — earn per dollar spent</option>
-          </select>
-        </label>
-      </div>
-      <div class="grid-2 no-print">
-        <label class="field" id="member-punches-wrap">Punches per reward card
-          <input id="member-punches" type="number" min="1" max="25" step="1" value="10" inputmode="numeric">
-        </label>
-        <label class="field" id="member-ppreward-wrap" style="display:none">Points per reward
-          <input id="member-ppreward" type="number" min="1" max="1000" step="1" value="100" inputmode="numeric">
-        </label>
-      </div>
-      <button id="member-add-btn" class="btn no-print" type="button">Add member</button>
-      <h3>Members</h3>
-      <div class="member-finder no-print">
-        <input id="member-search" type="search" placeholder="Search members by name…" aria-label="Search members">
-        <label class="sort-wrap">Sort
-          <select id="member-sort" aria-label="Sort members">
-            <option value="newest">Newest first</option>
-            <option value="name">Name A–Z</option>
-            <option value="visits">Most visits</option>
-          </select>
-        </label>
-        <button id="member-csv-btn" class="btn secondary small" type="button">Export CSV</button>
-        <button id="member-import-btn" class="btn secondary small" type="button">Import CSV</button>
-        <input id="member-import-file" type="file" accept=".csv,text/csv" style="display:none" aria-hidden="true">
-      </div>
-      <div id="member-list"></div>
-    </div>
-  </section>
-</main>
-
-<div id="toast" class="no-print" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2b2118;color:#fff;padding:12px 22px;border-radius:0;font-size:15px;box-shadow:0 4px 18px rgba(0,0,0,.25);z-index:50;"></div>
-
-<footer class="app-footer no-print">
-  LoyaltyLoop AI · 100% free · local-first · zero API keys · no tracking
-</footer>
+<div id="toast" class="no-print" style="display:none"></div>
 
 <script src="js/logic.js"></script>
 <script src="js/app.js"></script>
