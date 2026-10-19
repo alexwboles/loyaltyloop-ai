@@ -306,6 +306,86 @@ if (acts[0].name !== 'Eli' || acts[1].name !== 'Dana') { console.error('activity
 NODEEOF
 pass "flow 16: overview dashboard journey (KPIs, top member, activity order)"
 
+# Flow 17: the merged referral journey — rule -> codes -> refer -> complete -> reward
+node <<'NODEEOF' || fail "flow 17: merged referral journey"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+// Owner sets the deal: friends get $10 off, referrers earn 2 bonus punches.
+const rule = L.buildReferralRule({ give: 10, type: 'dollars', minPurchase: 25, bonusPunches: 2 });
+if (!/2 bonus punches/.test(rule.summary)) process.exit(1);
+let i = 0;
+const rand = () => (i = (i * 9301 + 49297) % 233280) / 233280;
+const codes = L.generateBatch('BAKERY', 5, rand);
+// Maria refers Nina. Maria is not a member yet -> auto-enrolled.
+const members = [];
+const en = L.autoEnrollMember(members, 'Maria Lopez', { punchesPerCard: 10 });
+if (!en.created || members.length !== 1) { console.error('referrer must auto-enroll'); process.exit(1); }
+en.member.referralCode = L.personalReferralCode(en.member.name, rand);
+L.recordReferralEvent(en.member, 'sent');
+const ref = L.createReferral(codes[0], 'Maria Lopez', 'Nina Friend', '', 'sms');
+const referrals = [ref];
+if (L.computeStats(referrals, {}).totalSent !== 1) { console.error('sent count'); process.exit(1); }
+// Nina buys -> referral completes: Nina auto-enrolls, Maria earns bonus punches.
+L.advanceStatus(ref);
+const f = L.autoEnrollMember(members, ref.friendName, { referredBy: ref.referrerName });
+if (!f.created || f.member.referredBy !== 'Maria Lopez') { console.error('friend must auto-enroll'); process.exit(1); }
+const rm = L.autoEnrollMember(members, ref.referrerName, {});
+const ev = L.recordReferralEvent(rm.member, 'completed', rule.bonusPunches);
+if (ev.bonus.bonusPunches !== 2) { console.error('bonus punches'); process.exit(1); }
+if (members.length !== 2) { console.error('roster should have 2, got ' + members.length); process.exit(1); }
+// Referral settles -> rewarded, cost logged to the ledger.
+L.advanceStatus(ref, 'rewarded');
+let ledger = L.logReward([], { referrer: ref.referrerName, friend: ref.friendName, code: ref.code, amount: rule.costPerReferral });
+L.recordReferralEvent(rm.member, 'rewarded');
+const lb = L.leaderboard(referrals, {});
+if (lb.length !== 1 || lb[0].name !== 'Maria Lopez' || lb[0].completed !== 1) {
+  console.error('leaderboard: ' + JSON.stringify(lb)); process.exit(1);
+}
+const roi = L.programROI(referrals, ledger, 120);
+if (roi.estRevenue !== 120 || roi.rewardCost !== 10 || roi.net !== 110) {
+  console.error('roi: ' + JSON.stringify(roi)); process.exit(1);
+}
+// Invite message fills from the merged rule + Maria's personal code.
+const msg = L.fillTemplate(L.DEFAULT_TEMPLATES.sms, L.referralTemplateVars(rule, 'Sunrise Bakery', en.member.referralCode));
+if (msg.indexOf('$10 off') === -1 || msg.indexOf('2 bonus punches') === -1 || msg.indexOf(en.member.referralCode) === -1) {
+  console.error('invite: ' + msg); process.exit(1);
+}
+NODEEOF
+pass "flow 17: rule -> codes -> refer -> complete (bonus + auto-enroll) -> reward -> ROI"
+
+# Flow 18: bonus punches push a member over a reward threshold
+node <<'NODEEOF' || fail "flow 18: bonus punches earn the reward"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const m = L.createMember('Sam', { punchesPerCard: 10 });
+for (let i = 0; i < 8; i++) L.logVisit(m);
+// Two referral bonuses land Sam at 10 effective punches -> reward earned.
+const ev = L.recordReferralEvent(m, 'completed', 2);
+if (!ev.bonus.rewardEarnedNow) { console.error('bonus should trigger reward'); process.exit(1); }
+if (L.rewardsAvailable(m) !== 1) { console.error('available=' + L.rewardsAvailable(m)); process.exit(1); }
+const p = L.visitsToNextReward(m);
+if (p.toGo !== 0 || p.bonusPunches !== 2) { console.error('progress: ' + JSON.stringify(p)); process.exit(1); }
+// Redeeming still works; the card keeps counting from the 10th punch.
+L.redeemReward(m);
+if (L.rewardsAvailable(m) !== 0 || m.redeemed !== 1) { console.error('redeem'); process.exit(1); }
+NODEEOF
+pass "flow 18: 8 visits + 2 bonus punches -> reward earned -> redeemed"
+
+# Flow 19: points-mode member earns referral bonus points
+node <<'NODEEOF' || fail "flow 19: points-mode referral bonus"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+// 100 points = 1 reward; 2 bonus punches = 1/5 of a reward = 20 bonus points.
+const m = L.createMember('Rita Retail', { mode: 'points', pointsPerDollar: 1, pointsPerReward: 100 });
+L.logPurchase(m, 50); // 50 pts
+const ev = L.recordReferralEvent(m, 'completed', 2);
+if (ev.bonus.pointsBonus !== 20) { console.error('points bonus: ' + JSON.stringify(ev.bonus)); process.exit(1); }
+if (m.points !== 70 || m.bonusPoints !== 20) { console.error('balances: ' + m.points); process.exit(1); }
+const prog = L.visitsToNextReward(m);
+if (prog.toGo !== 30) { console.error('progress: ' + JSON.stringify(prog)); process.exit(1); }
+NODEEOF
+pass "flow 19: points member gets 20 bonus points from a referral"
+
 echo "---"
 echo "e2e: $PASS passed, $FAIL failed"
 exit "$FAIL"

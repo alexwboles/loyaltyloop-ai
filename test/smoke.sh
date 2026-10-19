@@ -432,6 +432,203 @@ if (L.atRiskMembers(all, 30).length !== 1) { console.error('at-risk'); process.e
 NODEEOF
 pass "overview aggregates: visits, rewards, top-member sort, at-risk count"
 
+# 29. logic.js exports the referral engine + merge API
+node <<'EOF' || fail "referral logic exports"
+const L = require('./js/logic.js');
+const fns = ['generateCode','generateBatch','isValidCodeFormat','personalReferralCode',
+  'buildRule','buildReferralRule','createReferral','canAdvance','nextStatus','advanceStatus',
+  'countByStatus','leaderboard','fillTemplate','templateVarsFromRule','referralTemplateVars',
+  'computeStats','referralsToCSV','filterReferrals','findDuplicate','markAllRewarded',
+  'conversionByMonth','conversionByChannel','tierFor','staleReferrals','followUpText',
+  'makeBatch','codeExpiry','isCodeExpired','logReward','ledgerTotals','programROI',
+  'referrerOfMonth','spotlightText','findMemberByName','autoEnrollMember',
+  'awardBonusPunches','recordReferralEvent','money','monthKey','normalizeChannel','normalizePrefix'];
+for (const f of fns) if (typeof L[f] !== 'function') { console.error('missing fn: ' + f); process.exit(1); }
+for (const t of ['STATUS','REWARD_TYPES','TIERS','DEFAULT_TEMPLATES','CHANNELS','CHANNEL_LABELS']) {
+  if (!L[t]) { console.error('missing table: ' + t); process.exit(1); }
+}
+EOF
+pass "logic.js exports referral engine + merge functions"
+
+# 30. referral codes: format, batch uniqueness, batch errors
+node <<'EOF' || fail "referral codes"
+const L = require('./js/logic.js');
+let i = 0;
+const rand = () => (i = (i * 9301 + 49297) % 233280) / 233280;
+const batch = L.generateBatch('MAIN-ST', 20, rand);
+if (new Set(batch).size !== 20) { console.error('batch not unique'); process.exit(1); }
+if (!batch.every(c => L.isValidCodeFormat(c) && c.startsWith('MAIN-ST-'))) {
+  console.error('bad format: ' + batch[0]); process.exit(1);
+}
+if (L.isValidCodeFormat('MAIN-ST-0000')) { console.error('0/O lookalikes must be rejected'); process.exit(1); }
+for (const bad of [0, -3, 1001, 'abc']) {
+  let threw = false;
+  try { L.generateBatch('X', bad, rand); } catch (e) { threw = true; }
+  if (!threw) { console.error('batch size ' + bad + ' should throw'); process.exit(1); }
+}
+// member personal codes
+const mc = L.personalReferralCode('Maria Lopez', rand);
+if (!L.isValidCodeFormat(mc) || !mc.startsWith('MARIA-LOPEZ-')) { console.error('member code: ' + mc); process.exit(1); }
+EOF
+pass "referral codes: 20 unique, valid format, no lookalikes, batch errors"
+
+# 31. buildReferralRule: merged rule shape + cost math
+node <<'EOF' || fail "buildReferralRule"
+const L = require('./js/logic.js');
+let r = L.buildReferralRule({ give: 10, type: 'dollars', minPurchase: 25, bonusPunches: 2 });
+if (r.costPerReferral !== 10) { console.error('cost: ' + r.costPerReferral); process.exit(1); }
+if (r.giveText !== '$10 off') { console.error('giveText: ' + r.giveText); process.exit(1); }
+if (!/Give friends \$10 off/.test(r.summary) || !/2 bonus punches/.test(r.summary)) {
+  console.error('summary: ' + r.summary); process.exit(1);
+}
+r = L.buildReferralRule({ give: 20, type: 'percent', minPurchase: 25, bonusPunches: 1 });
+if (r.costPerReferral !== 10) { console.error('percent cost: ' + r.costPerReferral); process.exit(1); } // 20% of $50 AOV
+if (!/1 bonus punch(?!es)/.test(r.summary)) { console.error('singular: ' + r.summary); process.exit(1); }
+r = L.buildReferralRule({});
+if (r.bonusPunches !== 2 || r.type !== 'dollars') { console.error('defaults'); process.exit(1); }
+const vars = L.referralTemplateVars(r, 'Acme Coffee', 'ABC-1234');
+if (vars.get !== '2 bonus punches' || vars.code !== 'ABC-1234' || vars.business !== 'Acme Coffee') {
+  console.error('vars: ' + JSON.stringify(vars)); process.exit(1);
+}
+EOF
+pass "buildReferralRule: summary, cost math, singular punch, template vars"
+
+# 32. referral pipeline: one-step transitions, no skipping
+node <<'EOF' || fail "referral pipeline"
+const L = require('./js/logic.js');
+const ref = L.createReferral('MAIN-ST-7K2Q', 'Maria Lopez', 'Nina Friend', 'nina@x.com', 'sms');
+if (ref.status !== 'sent' || !L.canAdvance(ref) || L.nextStatus(ref) !== 'completed') {
+  console.error('initial state wrong'); process.exit(1);
+}
+L.advanceStatus(ref);
+if (ref.status !== 'completed') { console.error('advance 1'); process.exit(1); }
+L.advanceStatus(ref, 'rewarded');
+if (ref.status !== 'rewarded' || L.canAdvance(ref)) { console.error('advance 2'); process.exit(1); }
+let threw = false;
+try { L.createReferral('MAIN-ST-7K2Q', 'A', 'B', '', '').status = 'sent', L.advanceStatus({ status: 'sent', history: [] }, 'rewarded'); }
+catch (e) { threw = true; }
+if (!threw) { console.error('sent->rewarded skip must throw'); process.exit(1); }
+threw = false;
+try { L.createReferral('bad code', 'A', 'B', '', ''); } catch (e) { threw = true; }
+if (!threw) { console.error('bad code must throw'); process.exit(1); }
+const c = L.countByStatus([ref]);
+if (c.rewarded !== 1) { console.error('counts'); process.exit(1); }
+EOF
+pass "referral pipeline: sent->completed->rewarded, skips rejected, bad codes rejected"
+
+# 33. duplicate detection + bulk reward
+node <<'EOF' || fail "duplicates + bulk reward"
+const L = require('./js/logic.js');
+const refs = [
+  L.createReferral('A-7K2Q', 'Maria', 'Nina', 'nina@x.com', ''),
+  L.createReferral('B-9M4P', 'Tom', 'Nina', '', '')
+];
+if (!L.findDuplicate(refs, 'nina', '')) { console.error('name dup missed'); process.exit(1); }
+if (!L.findDuplicate(refs, '', 'NINA@X.COM')) { console.error('contact dup missed'); process.exit(1); }
+if (L.findDuplicate(refs, 'Zed', 'zed@x.com')) { console.error('false dup'); process.exit(1); }
+L.advanceStatus(refs[0]); L.advanceStatus(refs[1]);
+if (L.markAllRewarded(refs) !== 2) { console.error('bulk count'); process.exit(1); }
+if (refs.some(r => r.status !== 'rewarded')) { console.error('bulk status'); process.exit(1); }
+if (L.markAllRewarded(refs) !== 0) { console.error('bulk idempotent'); process.exit(1); }
+EOF
+pass "duplicate detection (name + contact, case-insensitive) + bulk reward"
+
+# 34. stale referrals + follow-up text
+node <<'EOF' || fail "stale referrals"
+const L = require('./js/logic.js');
+const refs = [
+  L.createReferral('A-7K2Q', 'Maria', 'Old Friend', '', ''),
+  L.createReferral('B-9M4P', 'Tom', 'New Friend', '', '')
+];
+refs[0].createdAt = '2026-09-01T00:00:00.000Z';
+refs[1].createdAt = '2026-10-18T00:00:00.000Z';
+const stale = L.staleReferrals(refs, 21, '2026-10-19T00:00:00.000Z');
+if (stale.length !== 1 || stale[0].friendName !== 'Old Friend') { console.error('stale: ' + stale.length); process.exit(1); }
+const txt = L.followUpText(stale[0], 'Acme Coffee');
+if (txt.indexOf('Old Friend') === -1 || txt.indexOf('A-7K2Q') === -1 || txt.indexOf('Acme Coffee') === -1) {
+  console.error('nudge: ' + txt); process.exit(1);
+}
+EOF
+pass "stale referrals (21d window) + copy-ready nudge"
+
+# 35. reward ledger + program ROI
+node <<'EOF' || fail "ledger + ROI"
+const L = require('./js/logic.js');
+let ledger = [];
+ledger = L.logReward(ledger, { referrer: 'Maria', friend: 'Nina', code: 'A-7K2Q', amount: 10 });
+ledger = L.logReward(ledger, { referrer: 'Tom', friend: 'Zed', code: 'B-9M4P', amount: 7.5 });
+const t = L.ledgerTotals(ledger);
+if (t.count !== 2 || t.total !== 17.5) { console.error('totals: ' + JSON.stringify(t)); process.exit(1); }
+const refs = [L.createReferral('A-7K2Q', 'Maria', 'Nina', '', ''), L.createReferral('B-9M4P', 'Tom', 'Zed', '', '')];
+L.advanceStatus(refs[0]); L.advanceStatus(refs[0], 'rewarded');
+const roi = L.programROI(refs, ledger, 120);
+if (roi.rewardedCount !== 1 || roi.estRevenue !== 120 || roi.rewardCost !== 17.5 || roi.net !== 102.5) {
+  console.error('roi: ' + JSON.stringify(roi)); process.exit(1);
+}
+EOF
+pass "reward ledger totals + program ROI math"
+
+# 36. killer feature: auto-enroll + bonus punches
+node <<'EOF' || fail "auto-enroll + bonus punches"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const list = [];
+const first = L.autoEnrollMember(list, 'Maria Lopez', { punchesPerCard: 10 });
+if (!first.created || list.length !== 1) { console.error('enroll'); process.exit(1); }
+const second = L.autoEnrollMember(list, 'MARIA LOPEZ');
+if (second.created || second.member !== first.member) { console.error('dedup by name'); process.exit(1); }
+if (!L.findMemberByName(list, 'maria lopez') || L.findMemberByName(list, 'nobody')) {
+  console.error('findMemberByName'); process.exit(1);
+}
+// 8 visits on a 10-card, then 2 bonus punches -> reward earned
+const m = first.member;
+for (let i = 0; i < 8; i++) L.logVisit(m);
+if (L.rewardsEarned(m) !== 0) { console.error('pre-bonus'); process.exit(1); }
+const ev = L.recordReferralEvent(m, 'completed', 2);
+if (!ev.bonus.rewardEarnedNow || ev.bonus.rewardsEarned !== 1) {
+  console.error('bonus: ' + JSON.stringify(ev.bonus)); process.exit(1);
+}
+if (m.referralsCompleted !== 1 || m.bonusPunches !== 2) { console.error('counters'); process.exit(1); }
+const prog = L.visitsToNextReward(m);
+if (prog.bonusPunches !== 2 || prog.intoCard !== 0 || prog.toGo !== 0) {
+  console.error('progress: ' + JSON.stringify(prog)); process.exit(1);
+}
+// points mode: bonus converts at 10 punches = 1 reward
+const pm = L.createMember('Pat Points', { mode: 'points', pointsPerReward: 100 });
+const ev2 = L.recordReferralEvent(pm, 'completed', 2);
+if (ev2.bonus.pointsBonus !== 20 || pm.points !== 20 || pm.bonusPoints !== 20) {
+  console.error('points bonus: ' + JSON.stringify(ev2.bonus)); process.exit(1);
+}
+L.recordReferralEvent(m, 'sent'); L.recordReferralEvent(m, 'rewarded');
+if (m.referralsSent !== 1 || m.referralsRewarded !== 1) { console.error('event counters'); process.exit(1); }
+let threw = false;
+try { L.recordReferralEvent(m, 'bogus'); } catch (e) { threw = true; }
+if (!threw) { console.error('unknown event must throw'); process.exit(1); }
+EOF
+pass "killer feature: auto-enroll dedups, bonus punches earn a reward, points convert"
+
+# 37. index.html has the referral UI elements
+for id in section-referrals ref-business-name ref-bonus ref-give ref-min ref-rule-summary \
+    ref-rule-cost ref-offer-preview ref-code-prefix ref-batch-size ref-batch-expiry \
+    ref-gen-btn ref-code-list ref-code-datalist ref-form ref-code ref-referrer ref-friend \
+    ref-contact ref-channel ref-search ref-status-filter ref-reward-all ref-export \
+    ref-referral-rows ref-stale-count ref-stale-rows ref-trend-rows ref-channel-rows \
+    ref-podium ref-leaderboard-rows ref-spotlight-box ref-avg-value ref-roi-box \
+    ref-tpl-sms ref-tpl-email ref-preview-sms ref-preview-email ref-copy-sms \
+    ref-copy-email ref-reset-tpl rf-stat-sent rf-stat-completed rf-stat-rewarded \
+    rf-stat-conversion rf-stat-owed ov-refsent ov-refcompleted ov-refsent-sub \
+    ov-refcompleted-sub pc-include-ref; do
+  if grep -q "id=\"$id\"" index.html; then pass "index.html has #$id"; else fail "index.html missing #$id"; fi
+done
+
+# 38. app.js wires the referral engine + merge hooks
+for needle in renderReferralAll currentReferralRule advanceReferralAt autoEnrollMember \
+    recordReferralEvent personalReferralCode buildReferralRule referralTemplateVars \
+    bindReferralEvents migrateLegacyReferralData fillTemplate markAllRewarded \
+    findMemberByName followUpText referralsToCSV wireReferralRowButtons; do
+  if grep -q "$needle" js/app.js; then pass "app.js wires $needle"; else fail "app.js missing $needle"; fi
+done
+
 echo "---"
 echo "smoke: $PASS passed, $FAIL failed"
 exit "$FAIL"
