@@ -398,7 +398,7 @@
       return '<div class="risk-row" data-days="' + x.daysSince + '">' +
         '<span>' + esc(x.member.name) + '</span>' +
         '<span class="muted">' + x.daysSince + ' days since last visit</span>' +
-        '<button class="btn small secondary nudge-btn" type="button" data-name="' + esc(x.member.name) + '">Nudge</button>' +
+        '<button class="btn small secondary nudge-btn" type="button" data-id="' + esc(x.member.id) + '">Nudge</button>' +
         '<div class="nudge-panel" style="display:none">' +
           '<label class="nudge-label">Offer <input class="nudge-offer" type="text" value="10% off your next visit" maxlength="80"></label>' +
           '<textarea class="nudge-text" rows="4" readonly></textarea>' +
@@ -421,20 +421,22 @@
         if (showing) return;
         var offerInput = panel.querySelector('.nudge-offer');
         var textArea = panel.querySelector('.nudge-text');
-        var all = loadMembers();
-        var m = null;
-        for (var i = 0; i < all.length; i++) {
-          if (all[i].name === btn.getAttribute('data-name')) { m = all[i]; break; }
-        }
+        var m = findMember(loadMembers(), btn.getAttribute('data-id'));
         var days = parseInt(row.getAttribute('data-days'), 10) || 30;
         var draft = function () {
           textArea.value = winBackMessage(m, days, offerInput.value, $('pc-name').value);
         };
-        offerInput.addEventListener('input', draft);
+        // Wire the panel's inner controls only once per render — reopening the
+        // panel must not stack duplicate listeners, and the copy button must
+        // keep working on every click (not just the first per open).
+        if (!panel.getAttribute('data-wired')) {
+          panel.setAttribute('data-wired', '1');
+          offerInput.addEventListener('input', draft);
+          panel.querySelector('.nudge-copy').addEventListener('click', function () {
+            copyText(textArea.value, function () { showToast('Message copied — paste it into a text or email.'); });
+          });
+        }
         draft();
-        panel.querySelector('.nudge-copy').addEventListener('click', function () {
-          copyText(textArea.value, function () { showToast('Message copied — paste it into a text or email.'); });
-        }, { once: true });
       });
     });
   }
