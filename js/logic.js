@@ -363,6 +363,7 @@ function createMember(name, opts) {
   const punchesPerCard = Math.max(1, Math.round(toNum(opts.punchesPerCard, 10)));
   const mode = opts.mode === 'points' ? 'points' : 'punches';
   _memberSeq += 1;
+  var joinedAt = new Date().toISOString();
   return {
     id: opts.id != null ? String(opts.id) : 'm_' + _memberSeq + '_' + Date.now().toString(36),
     name: clean,
@@ -374,7 +375,7 @@ function createMember(name, opts) {
     pointsPerReward: Math.max(1, Math.round(toNum(opts.pointsPerReward, 100))),
     redeemed: 0,       // rewards the member has cashed in
     lastVisitAt: null, // ISO string of the most recent logged visit
-    joinedAt: new Date().toISOString(),
+    joinedAt: joinedAt,
     // Referral merge: referrers auto-enroll as members; completed referrals
     // award bonusPunches (punch mode folds them into rewards math).
     bonusPunches: 0,
@@ -383,8 +384,49 @@ function createMember(name, opts) {
     referredBy: opts.referredBy != null ? String(opts.referredBy).trim() : '',
     referralsSent: 0,
     referralsCompleted: 0,
-    referralsRewarded: 0
+    referralsRewarded: 0,
+    // v2: append-only transaction ledger for the member profile view.
+    // Entry: { ts: ISO, type: 'visit'|'purchase'|'bonus'|'reward'|'redeem'|'signup', amount: number, note: string }
+    ledger: [{ ts: joinedAt, type: 'signup', amount: 0, note: 'Member enrolled' }]
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* §8 — Member ledger helpers (append-only transaction history,       */
+/* Yotpo-style customer profile)                                      */
+
+var LEDGER_MAX = 400;
+
+function ensureMemberLedger(member) {
+  if (!member || typeof member !== 'object') return member;
+  if (!Array.isArray(member.ledger)) member.ledger = [];
+  return member;
+}
+
+/* Append one ledger entry; mutates the member. Returns the entry.
+ * Tolerates pre-upgrade member records (no ledger array yet). */
+function appendLedger(member, type, amount, note, atISO) {
+  ensureMemberLedger(member);
+  var entry = {
+    ts: atISO || new Date().toISOString(),
+    type: String(type || 'visit'),
+    amount: Math.max(0, toNum(amount, 0)),
+    note: String(note == null ? '' : note)
+  };
+  member.ledger.push(entry);
+  if (member.ledger.length > LEDGER_MAX) {
+    member.ledger.splice(0, member.ledger.length - LEDGER_MAX);
+  }
+  return entry;
+}
+
+/* Outstanding reward liability across the roster (Yotpo liability-report
+ * grade): unredeemed rewards × reward cost. Returns { count, amount }. */
+function outstandingLiability(members, rewardCost) {
+  var cost = Math.max(0, toNum(rewardCost, 0));
+  var count = 0;
+  (members || []).forEach(function (m) { count += rewardsAvailable(m); });
+  return { count: count, amount: round2(count * cost) };
 }
 
 /* Number of full rewards a member has earned.
@@ -423,6 +465,7 @@ function redeemReward(member) {
     member.points = Math.max(0, toNum(member.points, 0) - per);
   }
   member.redeemed = (Number.isFinite(Number(member.redeemed)) ? Number(member.redeemed) : 0) + 1;
+  appendLedger(member, 'redeem', 1, 'Reward redeemed');
   return {
     member: member,
     redeemed: member.redeemed,
@@ -431,27 +474,51 @@ function redeemReward(member) {
 }
 
 /* Log one visit. Mutates + returns the member, and whether a reward was earned.
- * atISO is the visit timestamp (ISO string); defaults to now. */
-function logVisit(member, atISO) {
+ * atISO is the visit timestamp (ISO string); defaults to now.
+ * opts.bonusPunches (v2): extra punches credited with this visit (campaigns). */
+function logVisit(member, atISO, opts) {
   if (!member || typeof member.visits !== 'number') {
     throw new Error('logVisit: invalid member object');
   }
   const before = rewardsEarned(member);
   member.visits += 1;
   member.lastVisitAt = atISO || new Date().toISOString();
+  var bonusNote = '';
+  var bonusCount = 0;
+  if (opts && toNum(opts.bonusPunches, 0) > 0) {
+    // v2 campaigns: fold bonus punches in directly (mode-aware), but emit
+    // exactly one ledger entry and one reward-earned check per visit —
+    // routing through awardBonusPunches here would double-count rewards.
+    bonusCount = Math.max(1, Math.round(toNum(opts.bonusPunches, 0)));
+    bonusNote = String(opts.bonusNote || 'Campaign bonus');
+    if (member.mode === 'points') {
+      var per = Math.max(1, Math.round(toNum(member.pointsPerReward, 100)));
+      var pb = Math.max(1, Math.round((bonusCount * per) / 10));
+      member.points = round2(toNum(member.points, 0) + pb);
+      member.bonusPoints = round2(toNum(member.bonusPoints, 0) + pb);
+      appendLedger(member, 'bonus', pb, bonusNote, member.lastVisitAt);
+    } else {
+      member.bonusPunches = Math.max(0, Math.floor(toNum(member.bonusPunches, 0))) + bonusCount;
+      appendLedger(member, 'bonus', bonusCount, bonusNote, member.lastVisitAt);
+    }
+  }
+  appendLedger(member, 'visit', 1, bonusCount > 0 ? bonusNote : '', member.lastVisitAt);
   const after = rewardsEarned(member);
+  if (after > before) appendLedger(member, 'reward', after - before, 'Reward earned', member.lastVisitAt);
   return {
     member: member,
     visits: member.visits,
     lastVisitAt: member.lastVisitAt,
     rewardEarnedNow: after > before,
-    rewardsEarned: after
+    rewardsEarned: after,
+    campaignBonusPunches: bonusCount
   };
 }
 
 /* Log a purchase for a points-mode member: counts as a visit AND earns
- * pointsPerDollar points per dollar spent. Throws on bad member or spend. */
-function logPurchase(member, spend, atISO) {
+ * pointsPerDollar points per dollar spent. Throws on bad member or spend.
+ * opts.pointsMultiplier (v2): campaign multiplier, e.g. 2 for double points. */
+function logPurchase(member, spend, atISO, opts) {
   if (!member || typeof member.visits !== 'number') {
     throw new Error('logPurchase: invalid member object');
   }
@@ -462,19 +529,28 @@ function logPurchase(member, spend, atISO) {
   if (member.mode !== 'points') {
     throw new Error('logPurchase: member is not on a points program');
   }
+  var mult = 1;
+  if (opts && toNum(opts.pointsMultiplier, 1) > 1) {
+    mult = toNum(opts.pointsMultiplier, 1);
+  }
   const before = rewardsEarned(member);
-  const earned = Math.round(amount * Math.max(0.01, toNum(member.pointsPerDollar, 1)) * 100) / 100;
+  var earned = Math.round(amount * Math.max(0.01, toNum(member.pointsPerDollar, 1)) * 100) / 100;
+  earned = round2(earned * mult);
   member.points = round2(toNum(member.points, 0) + earned);
   member.visits += 1;
   member.lastVisitAt = atISO || new Date().toISOString();
+  appendLedger(member, 'purchase', earned,
+    mult > 1 ? 'Purchase · ' + mult + 'x points campaign' : 'Purchase', member.lastVisitAt);
   const after = rewardsEarned(member);
+  if (after > before) appendLedger(member, 'reward', after - before, 'Reward earned', member.lastVisitAt);
   return {
     member: member,
     spend: round2(amount),
     pointsEarned: earned,
     points: member.points,
     rewardEarnedNow: after > before,
-    rewardsEarned: after
+    rewardsEarned: after,
+    pointsMultiplier: mult
   };
 }
 
@@ -1258,8 +1334,9 @@ function autoEnrollMember(list, name, opts) {
 /* The killer feature, part 2: members who refer earn bonus punches.
  * Punch mode: n folds into member.bonusPunches (counts toward rewards).
  * Points mode: converts at 10 bonus punches = 1 full reward, credited as
- * bonus points. Mutates + returns the member. */
-function awardBonusPunches(member, n) {
+ * bonus points. note (v2, optional) is recorded in the member ledger.
+ * Mutates + returns the member. */
+function awardBonusPunches(member, n, note) {
   if (!member || typeof member.visits !== 'number') {
     throw new Error('awardBonusPunches: invalid member object');
   }
@@ -1274,7 +1351,10 @@ function awardBonusPunches(member, n) {
   } else {
     member.bonusPunches = Math.max(0, Math.floor(toNum(member.bonusPunches, 0))) + count;
   }
+  appendLedger(member, 'bonus', member.mode === 'points' ? pointsBonus : count,
+    note || (member.mode === 'points' ? 'Bonus points' : 'Bonus punches'));
   var after = rewardsEarned(member);
+  if (after > before) appendLedger(member, 'reward', after - before, 'Reward earned');
   return {
     member: member,
     bonusPunches: count,
@@ -1288,7 +1368,7 @@ function awardBonusPunches(member, n) {
  * 'sent' / 'completed' / 'rewarded' increment the matching counter;
  * 'completed' also awards `bonusPunches` bonus punches. Tolerates legacy
  * member records missing the referral fields. */
-function recordReferralEvent(member, event, bonusPunches) {
+function recordReferralEvent(member, event, bonusPunches, note) {
   if (!member || typeof member.visits !== 'number') {
     throw new Error('recordReferralEvent: invalid member object');
   }
@@ -1298,13 +1378,163 @@ function recordReferralEvent(member, event, bonusPunches) {
   }
   if (event === 'completed') {
     member.referralsCompleted = (member.referralsCompleted == null ? 0 : member.referralsCompleted) + 1;
-    return { member: member, bonus: awardBonusPunches(member, bonusPunches) };
+    return { member: member, bonus: awardBonusPunches(member, bonusPunches, note || 'Referral bonus') };
   }
   if (event === 'rewarded') {
     member.referralsRewarded = (member.referralsRewarded == null ? 0 : member.referralsRewarded) + 1;
     return { member: member, bonus: null };
   }
   throw new Error('recordReferralEvent: unknown event "' + event + '"');
+}
+
+/* ------------------------------------------------------------------ */
+/* §9 — Promotions (campaign engine: Yotpo "Active Campaigns" / Smile  */
+/* "2x points weekends" grade). Time-bound promos that auto-apply at  */
+/* stamp time and report per-campaign lift.                            */
+/* ------------------------------------------------------------------ */
+
+var CAMPAIGN_TYPES = ['double-punches', 'bonus-per-visit', 'signup-bonus'];
+var CAMPAIGN_TYPE_LABELS = {
+  'double-punches': 'Double punches',
+  'bonus-per-visit': 'Bonus punches per visit',
+  'signup-bonus': 'Signup bonus'
+};
+
+var _campaignSeq = 0;
+
+/* Create a campaign. name required; type one of CAMPAIGN_TYPES;
+ * value = bonus punches (bonus-per-visit, signup-bonus); ignored for
+ * double-punches. startsAt required (ISO); endsAt optional (open-ended). */
+function createCampaign(opts) {
+  opts = opts || {};
+  var name = String(opts.name == null ? '' : opts.name).trim();
+  if (!name) throw new Error('createCampaign: name is required');
+  var type = String(opts.type || 'double-punches');
+  if (CAMPAIGN_TYPES.indexOf(type) === -1) {
+    throw new Error('createCampaign: unknown type "' + type + '"');
+  }
+  var startsAt = opts.startsAt ? new Date(opts.startsAt) : null;
+  if (!startsAt || isNaN(startsAt.getTime())) {
+    throw new Error('createCampaign: a valid start date is required');
+  }
+  var endsAt = null;
+  if (opts.endsAt) {
+    endsAt = new Date(opts.endsAt);
+    if (isNaN(endsAt.getTime())) throw new Error('createCampaign: invalid end date');
+    if (endsAt.getTime() < startsAt.getTime()) {
+      throw new Error('createCampaign: end date is before the start date');
+    }
+  }
+  var value = Math.max(1, Math.round(toNum(opts.value, 1)));
+  _campaignSeq += 1;
+  return {
+    id: 'c_' + _campaignSeq + '_' + Date.now().toString(36),
+    name: name,
+    type: type,
+    value: value,
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt ? endsAt.toISOString() : null,
+    createdAt: new Date().toISOString()
+  };
+}
+
+/* 'live' | 'scheduled' | 'ended' for one campaign at nowISO. */
+function campaignStatus(c, nowISO) {
+  if (!c) return 'ended';
+  var now = nowISO ? new Date(nowISO).getTime() : Date.now();
+  var start = c.startsAt ? new Date(c.startsAt).getTime() : 0;
+  var end = c.endsAt ? new Date(c.endsAt).getTime() : Infinity;
+  if (now < start) return 'scheduled';
+  if (now > end) return 'ended';
+  return 'live';
+}
+
+function activeCampaigns(list, nowISO) {
+  return (list || []).filter(function (c) { return campaignStatus(c, nowISO) === 'live'; });
+}
+
+/* The effect of the live campaigns on a visit/purchase at atISO.
+ * Returns { bonusPunches, pointsMultiplier, labels[] } where labels are the
+ * campaign names driving the effect (for ledger notes + UI chips). */
+function campaignVisitEffect(campaigns, atISO) {
+  var live = activeCampaigns(campaigns, atISO).filter(function (c) {
+    return c.type === 'double-punches' || c.type === 'bonus-per-visit';
+  });
+  var bonus = 0;
+  var mult = 1;
+  var labels = [];
+  live.forEach(function (c) {
+    labels.push(c.name);
+    if (c.type === 'double-punches') { bonus += 1; mult *= 2; }
+    else if (c.type === 'bonus-per-visit') { bonus += Math.max(1, Math.round(toNum(c.value, 1))); }
+  });
+  return { bonusPunches: bonus, pointsMultiplier: mult, labels: labels };
+}
+
+/* Signup-bonus punches owed for a member who joins at joinedISO. */
+function signupBonusFor(campaigns, joinedISO) {
+  var bonus = 0;
+  var labels = [];
+  activeCampaigns(campaigns, joinedISO).forEach(function (c) {
+    if (c.type === 'signup-bonus') {
+      bonus += Math.max(1, Math.round(toNum(c.value, 1)));
+      labels.push(c.name);
+    }
+  });
+  return { bonusPunches: bonus, labels: labels };
+}
+
+/* Per-campaign reporting from member ledgers: visits stamped, members
+ * joined, and rewards earned inside the campaign window. */
+function campaignStats(campaign, members) {
+  var out = { visits: 0, joins: 0, rewards: 0 };
+  if (!campaign) return out;
+  var start = campaign.startsAt ? new Date(campaign.startsAt).getTime() : 0;
+  var end = campaign.endsAt ? new Date(campaign.endsAt).getTime() : Date.now();
+  (members || []).forEach(function (m) {
+    var j = m.joinedAt ? new Date(m.joinedAt).getTime() : 0;
+    if (j >= start && j <= end) out.joins += 1;
+    (m.ledger || []).forEach(function (e) {
+      var t = e.ts ? new Date(e.ts).getTime() : 0;
+      if (t < start || t > end) return;
+      if (e.type === 'visit' || e.type === 'purchase') out.visits += 1;
+      else if (e.type === 'reward') out.rewards += Number(e.amount) || 0;
+    });
+  });
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* §10 — Action-based earning rules (Smile "ways to earn" grade).      */
+/* Configurable bonus actions merchants award with one click.          */
+/* ------------------------------------------------------------------ */
+
+var EARNING_ACTIONS = [
+  { id: 'signup', label: 'New-member signup bonus' },
+  { id: 'birthday', label: 'Birthday bonus' },
+  { id: 'review', label: 'Review / shout-out bonus' },
+  { id: 'social', label: 'Social follow bonus' }
+];
+
+function defaultEarningRules() {
+  return { signup: 1, birthday: 1, review: 2, social: 1 };
+}
+
+function earningActionLabel(id) {
+  for (var i = 0; i < EARNING_ACTIONS.length; i++) {
+    if (EARNING_ACTIONS[i].id === id) return EARNING_ACTIONS[i].label;
+  }
+  return null;
+}
+
+/* Award a configured action bonus to a member (points mode converts via
+ * awardBonusPunches). rules maps action id -> bonus punches. */
+function awardActionBonus(member, actionId, rules) {
+  var label = earningActionLabel(actionId);
+  if (!label) throw new Error('awardActionBonus: unknown action "' + actionId + '"');
+  var n = Math.max(0, Math.round(toNum(rules && rules[actionId], 0)));
+  if (n < 1) throw new Error('awardActionBonus: "' + label + '" is set to 0 — enable it in Program studio first');
+  return awardBonusPunches(member, n, label);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1390,6 +1620,24 @@ if (typeof module !== 'undefined' && module.exports) {
     findMemberByName: findMemberByName,
     autoEnrollMember: autoEnrollMember,
     awardBonusPunches: awardBonusPunches,
-    recordReferralEvent: recordReferralEvent
+    recordReferralEvent: recordReferralEvent,
+    // v2: member ledger
+    LEDGER_MAX: LEDGER_MAX,
+    ensureMemberLedger: ensureMemberLedger,
+    appendLedger: appendLedger,
+    outstandingLiability: outstandingLiability,
+    // v2: promotions (campaign engine)
+    CAMPAIGN_TYPES: CAMPAIGN_TYPES,
+    CAMPAIGN_TYPE_LABELS: CAMPAIGN_TYPE_LABELS,
+    createCampaign: createCampaign,
+    campaignStatus: campaignStatus,
+    activeCampaigns: activeCampaigns,
+    campaignVisitEffect: campaignVisitEffect,
+    signupBonusFor: signupBonusFor,
+    campaignStats: campaignStats,
+    // v2: action-based earning rules ("ways to earn")
+    EARNING_ACTIONS: EARNING_ACTIONS,
+    defaultEarningRules: defaultEarningRules,
+    awardActionBonus: awardActionBonus
   };
 }

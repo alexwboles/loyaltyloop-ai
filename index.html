@@ -38,6 +38,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12v10H4V12"/><rect x="2" y="7" width="20" height="5"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
         Referrals
       </button>
+      <button class="tab-btn" data-tab="promotions" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l14-6v14L3 13v-2z"/><path d="M7 13.5V18a1.5 1.5 0 0 0 3 0v-3.5"/><path d="M17 8.5a4 4 0 0 1 0 7"/></svg>
+        Promotions <span class="tab-count" id="promo-count"></span>
+      </button>
       <button class="tab-btn" data-tab="print" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="9"/><path d="M6 15h12v6H6z"/></svg>
         Print cards
@@ -60,6 +64,7 @@
           <div class="kpi"><span class="kpi-num" id="ov-visits">0</span><span class="kpi-lbl">Visits logged</span><span class="kpi-sub" id="ov-visits-sub"></span></div>
           <div class="kpi"><span class="kpi-num" id="ov-earned">0</span><span class="kpi-lbl">Rewards earned</span><span class="kpi-sub" id="ov-earned-sub"></span></div>
           <div class="kpi"><span class="kpi-num" id="ov-redeemed">0</span><span class="kpi-lbl">Rewards redeemed</span><span class="kpi-sub" id="ov-redeemed-sub"></span></div>
+          <div class="kpi"><span class="kpi-num" id="ov-liability">0</span><span class="kpi-lbl">Outstanding liability</span><span class="kpi-sub" id="ov-liability-sub"></span></div>
           <div class="kpi"><span class="kpi-num" id="ov-refsent">0</span><span class="kpi-lbl">Referrals sent</span><span class="kpi-sub" id="ov-refsent-sub"></span></div>
           <div class="kpi"><span class="kpi-num" id="ov-refcompleted">0</span><span class="kpi-lbl">Referrals completed</span><span class="kpi-sub" id="ov-refcompleted-sub"></span></div>
         </div>
@@ -111,6 +116,32 @@
             <button id="rec-btn" class="btn no-print" type="button">Recommend my program</button>
           </div>
           <div id="rec-result"></div>
+        </div>
+
+        <div class="card">
+          <p class="kicker">Ways to earn</p>
+          <h2>Reward the actions that grow your business</h2>
+          <p class="lead">Beyond visits and purchases: one-click bonus awards for birthdays, reviews, social follows, and new signups. Bonuses fold into the member's card exactly like referral bonuses do, and every award is written to the member's ledger.</p>
+          <div class="grid-2 no-print" id="earn-rules">
+            <label class="field">New-member signup bonus
+              <small>Bonus punches credited when a member joins.</small>
+              <input id="rule-signup" type="number" min="0" max="25" step="1" inputmode="numeric">
+            </label>
+            <label class="field">Birthday bonus
+              <small>Awarded from the member's history panel.</small>
+              <input id="rule-birthday" type="number" min="0" max="25" step="1" inputmode="numeric">
+            </label>
+            <label class="field">Review / shout-out bonus
+              <small>For a Google review, tagged post, or testimonial.</small>
+              <input id="rule-review" type="number" min="0" max="25" step="1" inputmode="numeric">
+            </label>
+            <label class="field">Social follow bonus
+              <small>For following your business on social.</small>
+              <input id="rule-social" type="number" min="0" max="25" step="1" inputmode="numeric">
+            </label>
+          </div>
+          <button id="rules-save-btn" class="btn no-print" type="button">Save earning rules</button>
+          <p class="muted small">Set any rule to 0 to disable that bonus. Points-mode members get the equivalent bonus points.</p>
         </div>
       </section>
 
@@ -176,6 +207,7 @@
         </div>
 
         <div class="card">
+          <div id="member-campaign-chip"></div>
           <div class="member-finder no-print">
             <input id="member-search" type="search" placeholder="Search members by name…" aria-label="Search members">
             <label class="sort-wrap">Sort
@@ -405,6 +437,39 @@
         </div>
       </section>
 
+      <!-- ============ PROMOTIONS ============ -->
+      <section id="section-promotions" class="tab-section" aria-label="Promotions and campaigns">
+        <div class="card">
+          <p class="kicker">Promotions</p>
+          <h2>Run a campaign, watch visits spike</h2>
+          <p class="lead">Time-bound promos — double-punch weekends, bonus-per-visit events, signup bonuses — that apply themselves automatically when you stamp a visit. Every stamp during a live campaign is tagged in the member's ledger.</p>
+          <form id="camp-form" class="formgrid no-print">
+            <label class="field">Campaign name
+              <input id="camp-name" type="text" placeholder="e.g. Grand-opening weekend" maxlength="60" required>
+            </label>
+            <label class="field">Campaign type
+              <select id="camp-type">
+                <option value="double-punches">Double punches (visits count double)</option>
+                <option value="bonus-per-visit">Bonus punches per visit</option>
+                <option value="signup-bonus">Signup bonus (new members)</option>
+              </select>
+            </label>
+            <label class="field" id="camp-value-wrap">Bonus punches
+              <small>Credited on top of the visit.</small>
+              <input id="camp-value" type="number" min="1" max="25" step="1" value="2" inputmode="numeric">
+            </label>
+            <label class="field">Starts
+              <input id="camp-start" type="date" required>
+            </label>
+            <label class="field">Ends (optional)
+              <input id="camp-end" type="date">
+            </label>
+            <button class="btn" type="submit">Launch campaign</button>
+          </form>
+          <div id="campaign-list"></div>
+        </div>
+      </section>
+
       <!-- ============ PRINT CARDS ============ -->
       <section id="section-print" class="tab-section" aria-label="Printable punch cards">
         <div class="card">
@@ -442,6 +507,18 @@
     </footer>
   </div>
 </div>
+
+<div id="drawer-scrim" class="drawer-scrim no-print" style="display:none"></div>
+<aside id="member-drawer" class="drawer no-print" style="display:none" aria-label="Member history" role="dialog" aria-modal="true">
+  <div class="drawer-head">
+    <div>
+      <p class="kicker" id="drawer-kicker">Member profile</p>
+      <h2 id="drawer-title">Member</h2>
+    </div>
+    <button id="drawer-close" class="btn small secondary" type="button">Close</button>
+  </div>
+  <div id="drawer-body"></div>
+</aside>
 
 <div id="toast" class="no-print" style="display:none"></div>
 

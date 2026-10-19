@@ -50,6 +50,7 @@
     economics: { eyebrow: 'Program studio', title: 'Check the economics' },
     members: { eyebrow: 'Members', title: 'Your regulars' },
     referrals: { eyebrow: 'Refer & grow', title: 'Referrals turn regulars into recruiters' },
+    promotions: { eyebrow: 'Promotions', title: 'Campaigns that fill the room' },
     print: { eyebrow: 'Print & hand out', title: 'Cards on the counter' }
   };
 
@@ -63,6 +64,8 @@
     if (name === 'overview') renderOverview();
     if (name === 'members') renderMembers();
     if (name === 'referrals') renderReferralAll();
+    if (name === 'promotions') renderPromotions();
+    if (name === 'program') renderEarningRules();
   }
   tabButtons.forEach(function (b) {
     b.addEventListener('click', function () { showTab(b.dataset.tab); });
@@ -97,6 +100,9 @@
       rewardEveryN: num('ec-everyn', 10),
       visitLiftPct: num('ec-lift', 0)
     });
+    // v2: the reward cost feeds the outstanding-liability KPI on Overview.
+    appSettings.rewardCost = Math.max(0, num('ec-cost', 0));
+    v2Save(SETTINGS_KEY, appSettings);
     var cls = r.netBenefit > 0.005 ? 'good' : (r.netBenefit < -0.005 ? 'bad' : 'neutral');
     var beText = r.breakEvenLiftPct === Infinity ? 'unreachable' : r.breakEvenLiftPct.toFixed(2) + '%';
     var html = '<div class="result"><dl class="kv">' +
@@ -166,12 +172,47 @@
   });
 
   /* ---------- 4. member tracker (localStorage) ---------- */
+  var SETTINGS_KEY = 'loyaltyloop.settings.v1';
+  var CAMPAIGNS_KEY = 'loyaltyloop.campaigns.v1';
+  var RULES_KEY = 'loyaltyloop.rules.v1';
+
+  function v2Load(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch (e) { return fallback; }
+  }
+  function v2Save(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
+
+  var appSettings = v2Load(SETTINGS_KEY, {});
+  if (!appSettings || typeof appSettings !== 'object') appSettings = {};
+  var campaigns = v2Load(CAMPAIGNS_KEY, []);
+  if (!Array.isArray(campaigns)) campaigns = [];
+  var earningRules = v2Load(RULES_KEY, null);
+  if (!earningRules || typeof earningRules !== 'object') {
+    earningRules = defaultEarningRules();
+    v2Save(RULES_KEY, earningRules);
+  }
+
   function loadMembers() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       var arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
-    } catch (e) { return []; }
+      arr = Array.isArray(arr) ? arr : [];
+    } catch (e) { var arr = []; }
+    // v2 migration: every member gets an append-only ledger (idempotent).
+    var dirty = false;
+    arr.forEach(function (m) {
+      if (!Array.isArray(m.ledger)) {
+        ensureMemberLedger(m);
+        m.ledger = [{ ts: m.joinedAt || new Date().toISOString(), type: 'signup', amount: 0, note: 'Member enrolled' }];
+        dirty = true;
+      }
+    });
+    if (dirty) saveMembers(arr);
+    return arr;
   }
   function saveMembers(list) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
@@ -224,6 +265,16 @@
     $('ov-redeemed').textContent = String(redeemed);
     $('ov-redeemed-sub').textContent = earned ? Math.round((redeemed / earned) * 100) + '% redemption rate' : '';
 
+    // v2: outstanding reward liability (Yotpo liability-report grade).
+    var liab = outstandingLiability(all, appSettings.rewardCost);
+    if (appSettings.rewardCost > 0) {
+      $('ov-liability').textContent = fmtMoney(liab.amount);
+      $('ov-liability-sub').textContent = liab.count ? liab.count + ' unredeemed reward' + (liab.count === 1 ? '' : 's') + ' × ' + fmtMoney(appSettings.rewardCost) : 'nothing owed — clean book';
+    } else {
+      $('ov-liability').textContent = String(liab.count);
+      $('ov-liability-sub').textContent = 'rewards unredeemed · set a reward cost in Economics';
+    }
+
     // referral KPIs — same roster, merged engine
     var rs = computeStats(refState.referrals, {});
     $('ov-refsent').textContent = String(rs.totalSent);
@@ -273,6 +324,29 @@
           });
         }
       }
+      // v2: member-ledger events stream into the same tape (bonuses,
+      // rewards, redemptions, signups). Visit/purchase entries are covered
+      // by the check-in rows above, so they are skipped here.
+      (m.ledger || []).forEach(function (e) {
+        if (!e || !e.ts) return;
+        if (e.type === 'bonus') {
+          acts.push({ when: e.ts,
+            what: '<strong>' + esc(m.name) + '</strong> earned a bonus — ' + esc(e.note || 'bonus'),
+            tag: 'bonus', tagLabel: 'bonus' });
+        } else if (e.type === 'reward') {
+          acts.push({ when: e.ts,
+            what: '<strong>' + esc(m.name) + '</strong> unlocked a reward' + (e.note && e.note !== 'Reward earned' ? ' — ' + esc(e.note) : ''),
+            tag: 'reward', tagLabel: 'reward' });
+        } else if (e.type === 'redeem') {
+          acts.push({ when: e.ts,
+            what: '<strong>' + esc(m.name) + '</strong> redeemed a reward',
+            tag: 'redeem', tagLabel: 'redeemed' });
+        } else if (e.type === 'signup') {
+          acts.push({ when: e.ts,
+            what: '<strong>' + esc(m.name) + '</strong> joined the program',
+            tag: 'signup', tagLabel: 'new member' });
+        }
+      });
     });
     // referral events feed the same activity stream
     refState.referrals.forEach(function (r) {
@@ -365,7 +439,7 @@
       var rpTitle = isPoints
         ? prog.toGo + ' points to the next reward'
         : prog.toGo + ' visit' + (prog.toGo === 1 ? '' : 's') + ' to the next reward';
-      return '<div class="member-row" data-id="' + esc(m.id) + '">' +
+      return '<div class="member-row' + (available > 0 ? ' has-reward' : '') + '" data-id="' + esc(m.id) + '">' +
         '<span class="member-name">' + esc(m.name) +
         ' <span class="seg-badge seg-' + seg + '">' + seg + '</span>' +
         ' <span class="mode-badge mode-' + (isPoints ? 'points' : 'punches') + '">' +
@@ -383,6 +457,7 @@
         '<span class="rp-label">' + esc(rpLabel) + '</span></span>' +
         refLine +
         '<span class="member-actions">' +
+        (available > 0 ? '<span class="reward-seal">' + available + ' reward' + (available === 1 ? '' : 's') + ' earned</span>' : '') +
         (isPoints
           ? '<span class="purchase-wrap"><input class="purchase-amt" type="number" min="0" step="0.01" placeholder="Spend $" ' +
             'aria-label="Purchase amount for ' + esc(m.name) + '"><button class="btn small purchase-btn" type="button">Log purchase</button></span>'
@@ -390,6 +465,7 @@
         '<button class="btn small redeem-btn" type="button"' + (available < 1 ? ' disabled' : '') +
         ' title="' + (available < 1 ? 'No rewards to redeem yet' : available + ' reward(s) ready to redeem') + '">' +
         'Redeem' + (available > 0 ? ' (' + available + ')' : '') + '</button>' +
+        '<button class="btn small secondary history-btn" type="button" title="Full transaction history">History</button>' +
         '<button class="btn small secondary remove-btn" type="button">Remove</button>' +
         '</span></div>';
     }).join('');
@@ -402,11 +478,19 @@
         var list2 = loadMembers();
         var m = findMember(list2, btn.closest('.member-row').dataset.id);
         if (!m) return;
-        var res = logVisit(m);
+        var eff = campaignVisitEffect(campaigns); // live right now
+        var res = logVisit(m, undefined, {
+          bonusPunches: eff.bonusPunches,
+          bonusNote: eff.labels.length ? eff.labels.join(', ') : ''
+        });
         saveMembers(list2);
         renderMembers();
+        var note = '';
+        if (res.campaignBonusPunches > 0) note = ' (incl. +' + res.campaignBonusPunches + ' campaign bonus)';
         if (res.rewardEarnedNow) {
-          showToast(m.name + ' just earned a reward');
+          showToast(m.name + ' just earned a reward' + note);
+        } else if (note) {
+          showToast('Visit stamped' + note + ' for ' + m.name + '.');
         }
       });
     });
@@ -423,8 +507,9 @@
         var list2 = loadMembers();
         var m = findMember(list2, row.dataset.id);
         if (!m) return;
+        var eff2 = campaignVisitEffect(campaigns);
         try {
-          var res = logPurchase(m, spend);
+          var res = logPurchase(m, spend, undefined, { pointsMultiplier: eff2.pointsMultiplier });
         } catch (e) {
           showToast(e.message || 'Could not log purchase.');
           return;
@@ -432,6 +517,7 @@
         saveMembers(list2);
         renderMembers();
         showToast(m.name + ' earned ' + res.pointsEarned + ' pts ($' + res.spend.toFixed(2) + ')' +
+          (res.pointsMultiplier > 1 ? ' · ' + res.pointsMultiplier + 'x campaign' : '') +
           (res.rewardEarnedNow ? ' — reward unlocked!' : ''));
       });
     });
@@ -457,6 +543,126 @@
         saveMembers(loadMembers().filter(function (m) { return m.id !== id; }));
         renderMembers();
       });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('.history-btn'), function (btn) {
+      btn.addEventListener('click', function () {
+        openMemberDrawer(btn.closest('.member-row').dataset.id);
+      });
+    });
+    renderMemberCampaignChip();
+  }
+
+  /* v2: live-campaign banner above the member list (Smile "2x weekend" grade). */
+  function renderMemberCampaignChip() {
+    var chip = $('member-campaign-chip');
+    if (!chip) return;
+    var live = activeCampaigns(campaigns);
+    if (!live.length) { chip.innerHTML = ''; return; }
+    chip.innerHTML = live.map(function (c) {
+      var desc = c.type === 'double-punches' ? 'visits count double'
+        : c.type === 'bonus-per-visit' ? '+' + c.value + ' bonus punch' + (c.value === 1 ? '' : 'es') + ' per visit'
+        : '+' + c.value + ' bonus on signup';
+      return '<span class="camp-chip"><strong>LIVE</strong> ' + esc(c.name) + ' — ' + esc(desc) +
+        (c.endsAt ? ' · ends ' + esc(new Date(c.endsAt).toLocaleDateString()) : '') + '</span>';
+    }).join('');
+  }
+
+  /* v2: member profile drawer — Yotpo customer-profile grade.
+   * Stats, award-a-bonus actions, and the full transaction ledger. */
+  var drawerMemberId = null;
+
+  function openMemberDrawer(id) {
+    drawerMemberId = id;
+    renderMemberDrawer();
+    $('member-drawer').style.display = 'block';
+    $('drawer-scrim').style.display = 'block';
+    document.body.classList.add('drawer-open');
+  }
+  function closeMemberDrawer() {
+    drawerMemberId = null;
+    $('member-drawer').style.display = 'none';
+    $('drawer-scrim').style.display = 'none';
+    document.body.classList.remove('drawer-open');
+  }
+
+  function ledgerTypeLabel(t) {
+    return { visit: 'Visit', purchase: 'Purchase', bonus: 'Bonus', reward: 'Reward earned',
+             redeem: 'Redeemed', signup: 'Joined' }[t] || t;
+  }
+
+  function renderMemberDrawer() {
+    var m = findMember(loadMembers(), drawerMemberId);
+    if (!m) { closeMemberDrawer(); return; }
+    var earned = rewardsEarned(m);
+    var available = rewardsAvailable(m);
+    var redeemed = Number.isFinite(Number(m.redeemed)) ? Number(m.redeemed) : 0;
+    var seg = segmentMember(m);
+    var isPoints = m.mode === 'points';
+
+    $('drawer-title').textContent = m.name;
+    $('drawer-kicker').textContent = 'Member profile · ' + seg;
+
+    var html = '<dl class="kv drawer-stats">' +
+      '<dt>Program</dt><dd>' + (isPoints ? 'Points' : 'Punch card (' + (m.punchesPerCard || 10) + ' per reward)') + '</dd>' +
+      '<dt>Visits</dt><dd>' + (m.visits || 0) + ' · last ' + esc(relTime(m.lastVisitAt)) + '</dd>' +
+      '<dt>Rewards</dt><dd>' + earned + ' earned · ' + available + ' waiting · ' + redeemed + ' redeemed</dd>' +
+      (m.referralCode ? '<dt>Share code</dt><dd><span class="ref-code-chip">' + esc(m.referralCode) + '</span></dd>' : '') +
+      (m.referredBy ? '<dt>Referred by</dt><dd>' + esc(m.referredBy) + '</dd>' : '') +
+      '<dt>Member since</dt><dd>' + esc(fmtLastVisit(m.joinedAt)) + '</dd>' +
+      '</dl>';
+
+    html += '<h3>Award a bonus</h3><p class="muted small">One-click bonuses from your Ways-to-earn rules — recorded in the ledger below.</p><div class="award-row">';
+    EARNING_ACTIONS.forEach(function (a) {
+      if (a.id === 'signup') return; // signup bonus applies automatically on join
+      var n = Math.max(0, Math.round(Number(earningRules[a.id]) || 0));
+      html += '<button class="btn small' + (n < 1 ? ' secondary' : '') + ' award-btn" type="button" data-action="' +
+        esc(a.id) + '"' + (n < 1 ? ' disabled title="Set this bonus in Program studio first"' : '') + '>' +
+        esc(a.label) + (n > 0 ? ' (+' + n + ')' : '') + '</button>';
+    });
+    html += '</div>';
+
+    var entries = (m.ledger || []).slice().reverse();
+    html += '<h3>Transaction history <span class="count-badge">' + entries.length + '</span></h3>';
+    if (!entries.length) {
+      html += '<p class="empty-note">No transactions yet.</p>';
+    } else {
+      html += '<div class="ledger">' + entries.map(function (e) {
+        return '<div class="ledger-row"><span class="ledger-when">' + esc(fmtLastVisit(e.ts)) + '</span>' +
+          '<span class="ledger-type t-' + esc(e.type) + '">' + esc(ledgerTypeLabel(e.type)) + '</span>' +
+          '<span class="ledger-note">' + esc(e.note || '') + '</span></div>';
+      }).join('') + '</div>';
+    }
+    $('drawer-body').innerHTML = html;
+
+    Array.prototype.forEach.call($('drawer-body').querySelectorAll('.award-btn'), function (btn) {
+      btn.addEventListener('click', function () {
+        var list = loadMembers();
+        var mm = findMember(list, drawerMemberId);
+        if (!mm) return;
+        var action = btn.getAttribute('data-action');
+        try {
+          var res = awardActionBonus(mm, action, earningRules);
+        } catch (e) {
+          showToast(e.message);
+          return;
+        }
+        saveMembers(list);
+        renderMemberDrawer();
+        renderMembers();
+        var gained = isPoints ? res.pointsBonus + ' pts' : res.bonusPunches + ' bonus punch' + (res.bonusPunches === 1 ? '' : 'es');
+        showToast(m.name + ' awarded ' + gained + (res.rewardEarnedNow ? ' — reward unlocked!' : '.'));
+      });
+    });
+  }
+
+  var drawerCloseWired = false;
+  function wireDrawerChrome() {
+    if (drawerCloseWired) return;
+    drawerCloseWired = true;
+    $('drawer-close').addEventListener('click', closeMemberDrawer);
+    $('drawer-scrim').addEventListener('click', closeMemberDrawer);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && drawerMemberId) closeMemberDrawer();
     });
   }
 
@@ -567,14 +773,20 @@
     var mode = $('member-mode') ? $('member-mode').value : 'punches';
     var list = loadMembers();
     try {
-      list.push(createMember(name, {
+      var newMember = createMember(name, {
         punchesPerCard: Math.max(1, Math.round(num('member-punches', 10))),
         mode: mode,
         pointsPerReward: Math.max(1, Math.round(num('member-ppreward', 100)))
-      }));
+      });
+      list.push(newMember);
     } catch (e) {
       showToast('Could not add member.');
       return;
+    }
+    // v2: signup-bonus campaigns credit new members automatically.
+    var sb = signupBonusFor(campaigns, newMember.joinedAt);
+    if (sb.bonusPunches > 0) {
+      awardBonusPunches(newMember, sb.bonusPunches, 'Signup bonus — ' + sb.labels.join(', '));
     }
     saveMembers(list);
     nameInput.value = '';
@@ -639,6 +851,111 @@
     downloadCSV();
   });
 
+  /* ---------- v2: earning rules ("ways to earn") ---------- */
+  function renderEarningRules() {
+    EARNING_ACTIONS.forEach(function (a) {
+      var el = $('rule-' + a.id);
+      if (el) el.value = Math.max(0, Math.round(Number(earningRules[a.id]) || 0));
+    });
+  }
+  var rulesSaveWired = false;
+  function wireEarningRules() {
+    if (rulesSaveWired) return;
+    rulesSaveWired = true;
+    $('rules-save-btn').addEventListener('click', function () {
+      EARNING_ACTIONS.forEach(function (a) {
+        var el = $('rule-' + a.id);
+        if (el) earningRules[a.id] = Math.max(0, Math.round(Number(el.value) || 0));
+      });
+      v2Save(RULES_KEY, earningRules);
+      showToast('Earning rules saved.');
+    });
+  }
+
+  /* ---------- v2: promotions (campaign engine) ---------- */
+  function renderPromotions() {
+    var pc = $('promo-count');
+    if (pc) {
+      var live = activeCampaigns(campaigns);
+      pc.textContent = live.length ? String(live.length) : '';
+    }
+    var box = $('campaign-list');
+    var sorted = campaigns.slice().sort(function (a, b) {
+      return new Date(b.startsAt) - new Date(a.startsAt);
+    });
+    if (!sorted.length) {
+      box.innerHTML = '<p class="empty-note">No campaigns yet — launch your first one above. A double-punch weekend is the classic.</p>';
+      return;
+    }
+    var members = loadMembers();
+    box.innerHTML = sorted.map(function (c) {
+      var st = campaignStatus(c);
+      var stats = campaignStats(c, members);
+      var desc = c.type === 'double-punches' ? 'Visits count double'
+        : c.type === 'bonus-per-visit' ? '+' + c.value + ' bonus punch' + (c.value === 1 ? '' : 'es') + ' on every visit'
+        : '+' + c.value + ' bonus punch' + (c.value === 1 ? '' : 'es') + ' for every new signup';
+      var when = new Date(c.startsAt).toLocaleDateString() + ' → ' +
+        (c.endsAt ? new Date(c.endsAt).toLocaleDateString() : 'open-ended');
+      return '<div class="camp-card camp-' + st + '">' +
+        '<span class="camp-status st-' + st + '">' + st + '</span>' +
+        '<h3>' + esc(c.name) + '</h3>' +
+        '<p class="camp-desc">' + esc(desc) + ' · ' + esc(when) + '</p>' +
+        '<div class="camp-stats">' +
+        '<span><strong>' + stats.visits + '</strong> visits</span>' +
+        '<span><strong>' + stats.joins + '</strong> joins</span>' +
+        '<span><strong>' + stats.rewards + '</strong> rewards</span>' +
+        '</div>' +
+        '<button class="btn small secondary camp-del" type="button" data-id="' + esc(c.id) + '">Delete</button>' +
+        '</div>';
+    }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.camp-del'), function (btn) {
+      btn.addEventListener('click', function () {
+        campaigns = campaigns.filter(function (c) { return c.id !== btn.getAttribute('data-id'); });
+        v2Save(CAMPAIGNS_KEY, campaigns);
+        renderPromotions();
+        renderMemberCampaignChip();
+      });
+    });
+  }
+
+  var promosWired = false;
+  function wirePromotions() {
+    if (promosWired) return;
+    promosWired = true;
+    var typeSel = $('camp-type');
+    var valueWrap = $('camp-value-wrap');
+    var syncType = function () {
+      valueWrap.style.display = typeSel.value === 'double-punches' ? 'none' : '';
+    };
+    typeSel.addEventListener('change', syncType);
+    syncType();
+    var startInput = $('camp-start');
+    if (startInput && !startInput.value) {
+      startInput.value = new Date().toISOString().slice(0, 10);
+    }
+    $('camp-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = $('camp-name').value.trim();
+      if (!name) { showToast('Give the campaign a name.'); return; }
+      try {
+        campaigns.push(createCampaign({
+          name: name,
+          type: typeSel.value,
+          value: Math.max(1, Math.round(Number($('camp-value').value) || 1)),
+          startsAt: startInput.value,
+          endsAt: $('camp-end').value || null
+        }));
+      } catch (err) {
+        showToast(err.message || 'Could not create campaign.');
+        return;
+      }
+      v2Save(CAMPAIGNS_KEY, campaigns);
+      $('camp-name').value = '';
+      $('camp-end').value = '';
+      renderPromotions();
+      showToast('Campaign launched.');
+    });
+  }
   /* ---------- 5. referral engine (merged from ReferralPilot AI) ---------- */
   var REF_LS = {
     codes: 'loyaltyloop.codes.v1',
@@ -883,7 +1200,8 @@
       if (!f.member.referralCode) f.member.referralCode = personalReferralCode(f.member.name);
       var rm = autoEnrollMember(members, ref.referrerName, {});
       if (!rm.member.referralCode) rm.member.referralCode = personalReferralCode(rm.member.name);
-      var ev = recordReferralEvent(rm.member, 'completed', rule.bonusPunches);
+      var ev = recordReferralEvent(rm.member, 'completed', rule.bonusPunches,
+        'Referral bonus — ' + ref.friendName + ' completed');
       saveMembers(members);
       var b = ev.bonus;
       var msg = rm.member.name + ' earned ' + b.bonusPunches + ' bonus punch' +
@@ -1260,5 +1578,9 @@
 
   showTab('overview');
   renderMembers();
+  renderEarningRules();
+  wireEarningRules();
+  wirePromotions();
+  wireDrawerChrome();
   bindReferralEvents();
 })();

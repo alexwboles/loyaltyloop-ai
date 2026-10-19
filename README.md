@@ -46,6 +46,27 @@ signup sheet, and tracks members, visits, and referrals on one roster.
 8. **Lapsed-member detection + win-back nudges** — members with no visit in 30+
    days surface on a win-back list with a personalized, copy-ready nudge
    (offer + "you're N visits from a reward" progress hook).
+9. **Promotions (campaign engine)** — launch time-bound campaigns: double-punch
+   weekends, bonus-punches-per-visit events, and signup bonuses. Live campaigns
+   apply themselves automatically when you stamp a visit or log a purchase,
+   every affected stamp is tagged in the member's ledger, and each campaign
+   reports visits, joins, and rewards earned inside its window. Persisted in
+   `loyaltyloop.campaigns.v1`.
+10. **Ways to earn (action-based bonuses)** — beyond visits and purchases:
+    configurable bonus punches for new-member signup, birthdays, reviews /
+    shout-outs, and social follows. Award with one click from the member's
+    profile panel; bonuses fold into the card exactly like referral bonuses.
+    Rules live in Program studio (`loyaltyloop.rules.v1`).
+11. **Member profile + transaction ledger** — every member carries an
+    append-only ledger (visit, purchase, bonus, reward, redemption, signup)
+    with timestamps and notes. Click **History** on any member for a
+    Yotpo-grade profile: stats, one-click bonus awards, and the full
+    transaction history. Pre-upgrade rosters are migrated automatically
+    (a `signup` entry is backfilled; history starts from the upgrade).
+12. **Outstanding-liability KPI** — unredeemed rewards × your reward cost
+    (set in Economics), right on the dashboard, so you always know what the
+    program owes. The register-tape activity feed now streams bonuses,
+    rewards, redemptions, and signups alongside visits and referrals.
 
 ## Migration from ReferralPilot AI
 

@@ -629,6 +629,157 @@ for needle in renderReferralAll currentReferralRule advanceReferralAt autoEnroll
   if grep -q "$needle" js/app.js; then pass "app.js wires $needle"; else fail "app.js missing $needle"; fi
 done
 
+# 39. index.html has the v2 UI elements (promotions, drawer, liability)
+for id in section-promotions camp-name camp-type camp-value camp-value-wrap camp-start camp-end \
+    camp-form campaign-list promo-count member-campaign-chip member-drawer drawer-scrim \
+    drawer-close drawer-title drawer-body drawer-kicker ov-liability ov-liability-sub \
+    rule-signup rule-birthday rule-review rule-social rules-save-btn earn-rules; do
+  if grep -q "id=\"$id\"" index.html; then pass "index.html has #$id"; else fail "index.html missing #$id"; fi
+done
+
+# 40. app.js wires the v2 features
+for needle in renderPromotions renderMemberDrawer openMemberDrawer closeMemberDrawer \
+    campaignVisitEffect awardActionBonus signupBonusFor activeCampaigns campaignStats \
+    outstandingLiability renderEarningRules renderMemberCampaignChip wirePromotions \
+    wireEarningRules wireDrawerChrome ensureMemberLedger; do
+  if grep -q "$needle" js/app.js; then pass "app.js wires $needle"; else fail "app.js missing $needle"; fi
+done
+
+# 41. CSS: zero rounded corners, serif display type
+if grep -q "border-radius" css/style.css; then fail "CSS still contains border-radius"; fi
+pass "CSS: zero border-radius"
+for needle in "--display" "stamp-mini-card" "reward-seal" "camp-card" "drawer" "ledger-row"; do
+  if grep -q -- "$needle" css/style.css; then pass "CSS has $needle"; else fail "CSS missing $needle"; fi
+done
+
+# 42. createCampaign validation + statuses
+node <<'EOF' || fail "createCampaign validation + campaignStatus"
+const L = require('./js/logic.js');
+const c = L.createCampaign({ name: 'Weekend', type: 'double-punches', value: 5,
+  startsAt: '2026-10-18T00:00:00Z', endsAt: '2026-10-19T23:59:59Z' });
+if (c.value !== 5 || !c.id) { console.error('fields'); process.exit(1); }
+if (L.campaignStatus(c, '2026-10-18T12:00:00Z') !== 'live') { console.error('live'); process.exit(1); }
+if (L.campaignStatus(c, '2026-10-17T12:00:00Z') !== 'scheduled') { console.error('scheduled'); process.exit(1); }
+if (L.campaignStatus(c, '2026-10-20T12:00:00Z') !== 'ended') { console.error('ended'); process.exit(1); }
+const open = L.createCampaign({ name: 'Open', type: 'signup-bonus', value: 2, startsAt: '2026-01-01T00:00:00Z' });
+if (L.campaignStatus(open, '2027-01-01T00:00:00Z') !== 'live') { console.error('open-ended'); process.exit(1); }
+let threw = 0;
+try { L.createCampaign({ name: '', type: 'double-punches', startsAt: '2026-10-18' }); } catch (e) { threw++; }
+try { L.createCampaign({ name: 'x', type: 'bogus', startsAt: '2026-10-18' }); } catch (e) { threw++; }
+try { L.createCampaign({ name: 'x', type: 'double-punches', startsAt: 'not-a-date' }); } catch (e) { threw++; }
+try { L.createCampaign({ name: 'x', type: 'double-punches', startsAt: '2026-10-20', endsAt: '2026-10-18' }); } catch (e) { threw++; }
+if (threw !== 4) { console.error('validation threw=' + threw); process.exit(1); }
+EOF
+pass "createCampaign: validation, live/scheduled/ended, open-ended"
+
+# 43. campaignVisitEffect + signupBonusFor
+node <<'EOF' || fail "campaignVisitEffect + signupBonusFor"
+const L = require('./js/logic.js');
+const now = '2026-10-18T12:00:00Z';
+const dbl = L.createCampaign({ name: '2x', type: 'double-punches', startsAt: '2026-10-17', endsAt: '2026-10-19' });
+const bpv = L.createCampaign({ name: '+3', type: 'bonus-per-visit', value: 3, startsAt: '2026-10-17', endsAt: '2026-10-19' });
+const dead = L.createCampaign({ name: 'old', type: 'bonus-per-visit', value: 9, startsAt: '2026-09-01', endsAt: '2026-09-02' });
+const eff = L.campaignVisitEffect([dbl, bpv, dead], now);
+if (eff.bonusPunches !== 4 || eff.pointsMultiplier !== 2 || eff.labels.length !== 2) {
+  console.error('effect: ' + JSON.stringify(eff)); process.exit(1);
+}
+const none = L.campaignVisitEffect([], now);
+if (none.bonusPunches !== 0 || none.pointsMultiplier !== 1) { console.error('empty'); process.exit(1); }
+const sb = L.createCampaign({ name: 'Join!', type: 'signup-bonus', value: 2, startsAt: '2026-10-01', endsAt: '2026-12-31' });
+const sb2 = L.createCampaign({ name: 'Join2', type: 'signup-bonus', value: 1, startsAt: '2026-10-01', endsAt: '2026-12-31' });
+const s = L.signupBonusFor([sb, sb2, dbl], now);
+if (s.bonusPunches !== 3 || s.labels.length !== 2) { console.error('signup: ' + JSON.stringify(s)); process.exit(1); }
+EOF
+pass "campaignVisitEffect combines live promos; signupBonusFor stacks"
+
+# 44. earning rules + awardActionBonus
+node <<'EOF' || fail "earning rules + awardActionBonus"
+const L = require('./js/logic.js');
+const rules = L.defaultEarningRules();
+if (!rules.signup || !rules.birthday || !rules.review || !rules.social) { console.error('defaults'); process.exit(1); }
+const m = L.createMember('Sam', { punchesPerCard: 10 });
+const r = L.awardActionBonus(m, 'review', rules); // default 2
+if (m.bonusPunches !== 2 || r.rewardEarnedNow !== false) { console.error('bonus: ' + JSON.stringify(r)); process.exit(1); }
+if (!m.ledger.some(function (e) { return e.type === 'bonus' && /Review/.test(e.note); })) {
+  console.error('ledger note missing'); process.exit(1);
+}
+const pm = L.createMember('Pts', { mode: 'points', pointsPerReward: 100 });
+L.awardActionBonus(pm, 'birthday', rules); // 1 punch -> 10 pts
+if (pm.points !== 10) { console.error('points convert: ' + pm.points); process.exit(1); }
+let threw = 0;
+try { L.awardActionBonus(m, 'bogus', rules); } catch (e) { threw++; }
+try { L.awardActionBonus(m, 'review', { review: 0 }); } catch (e) { threw++; }
+if (threw !== 2) { console.error('throws=' + threw); process.exit(1); }
+EOF
+pass "awardActionBonus: punch + points conversion, ledger note, throws on bad input"
+
+# 45. ledger entries from logVisit / logPurchase / redeemReward
+node <<'EOF' || fail "ledger entries from visit/purchase/redeem"
+const L = require('./js/logic.js');
+const m = L.createMember('Jo', { punchesPerCard: 3 });
+if (m.ledger.length !== 1 || m.ledger[0].type !== 'signup') { console.error('signup entry'); process.exit(1); }
+L.logVisit(m, '2026-10-18T10:00:00Z', { bonusPunches: 1, bonusNote: '2x weekend' });
+if (m.ledger.length !== 3) { console.error('visit+bonus entries: ' + m.ledger.length); process.exit(1); }
+const kinds = m.ledger.map(function (e) { return e.type; });
+if (kinds.join(',') !== 'signup,bonus,visit') { console.error(kinds.join(',')); process.exit(1); }
+L.logVisit(m, '2026-10-18T11:00:00Z'); // visit 2, no campaign
+L.logVisit(m, '2026-10-18T12:00:00Z'); // visit 3 + bonus => 4/3 -> reward earned
+if (!m.ledger.some(function (e) { return e.type === 'reward'; })) { console.error('reward entry'); process.exit(1); }
+L.redeemReward(m);
+if (!m.ledger.some(function (e) { return e.type === 'redeem'; })) { console.error('redeem entry'); process.exit(1); }
+const pm = L.createMember('Pts', { mode: 'points', pointsPerDollar: 1, pointsPerReward: 100 });
+L.logPurchase(pm, 40, '2026-10-18T10:00:00Z', { pointsMultiplier: 2 });
+if (pm.points !== 80 || !pm.ledger.some(function (e) { return e.type === 'purchase' && /2x/.test(e.note); })) {
+  console.error('purchase ledger'); process.exit(1);
+}
+EOF
+pass "logVisit/logPurchase/redeemReward write timestamped ledger entries"
+
+# 46. ensureMemberLedger migration + LEDGER_MAX cap + outstandingLiability
+node <<'EOF' || fail "ledger migration + cap + outstandingLiability"
+const L = require('./js/logic.js');
+const legacy = { name: 'Old', visits: 5, punchesPerCard: 10, joinedAt: '2026-01-01T00:00:00Z' };
+L.ensureMemberLedger(legacy);
+if (!Array.isArray(legacy.ledger) || legacy.ledger.length !== 0) { console.error('migrate'); process.exit(1); }
+const m = L.createMember('Cap', { punchesPerCard: 100000 });
+for (let i = 0; i < L.LEDGER_MAX + 50; i++) L.appendLedger(m, 'visit', 1, 'x', '2026-10-18T10:00:00Z');
+if (m.ledger.length !== L.LEDGER_MAX) { console.error('cap: ' + m.ledger.length); process.exit(1); }
+const a = L.createMember('A', { punchesPerCard: 5 });
+for (let i = 0; i < 12; i++) L.logVisit(a); // 2 earned
+L.redeemReward(a); // 1 left
+const b = L.createMember('B', { punchesPerCard: 10 });
+const liab = L.outstandingLiability([a, b], 4.5);
+if (liab.count !== 1 || liab.amount !== 4.5) { console.error('liab: ' + JSON.stringify(liab)); process.exit(1); }
+const liab2 = L.outstandingLiability([a, b], 0);
+if (liab2.count !== 1 || liab2.amount !== 0) { console.error('liab2'); process.exit(1); }
+EOF
+pass "ensureMemberLedger migrates, ledger capped, outstandingLiability math"
+
+# 47. campaignStats from member ledgers
+node <<'EOF' || fail "campaignStats from ledgers"
+const L = require('./js/logic.js');
+const c = L.createCampaign({ name: 'Fall', type: 'double-punches',
+  startsAt: '2026-10-10T00:00:00Z', endsAt: '2026-10-12T23:59:59Z' });
+const m = L.createMember('A', { punchesPerCard: 100 });
+m.joinedAt = '2026-10-11T10:00:00Z';
+m.ledger = [{ ts: m.joinedAt, type: 'signup', amount: 0, note: '' }];
+L.logVisit(m, '2026-10-11T12:00:00Z');
+L.logVisit(m, '2026-10-20T12:00:00Z'); // outside window
+const s = L.campaignStats(c, [m]);
+if (s.joins !== 1 || s.visits !== 1) { console.error('stats: ' + JSON.stringify(s)); process.exit(1); }
+EOF
+pass "campaignStats counts windowed joins/visits/rewards"
+
+# 48. recordReferralEvent writes the ledger note
+node <<'EOF' || fail "recordReferralEvent ledger note"
+const L = require('./js/logic.js');
+const m = L.createMember('Ref', { punchesPerCard: 10 });
+L.recordReferralEvent(m, 'completed', 2, 'Referral bonus — Kim completed');
+const e = m.ledger.filter(function (x) { return x.type === 'bonus'; })[0];
+if (!e || e.note !== 'Referral bonus — Kim completed') { console.error('note: ' + JSON.stringify(e)); process.exit(1); }
+EOF
+pass "recordReferralEvent carries the bonus note into the ledger"
+
 echo "---"
 echo "smoke: $PASS passed, $FAIL failed"
 exit "$FAIL"

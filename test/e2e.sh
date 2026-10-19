@@ -386,6 +386,70 @@ if (prog.toGo !== 30) { console.error('progress: ' + JSON.stringify(prog)); proc
 NODEEOF
 pass "flow 19: points member gets 20 bonus points from a referral"
 
+# Flow 20: promotion journey — double-punches campaign accelerates a reward
+node <<'NODEEOF' || fail "flow 20: campaign accelerates reward"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const now = '2026-10-18T12:00:00Z';
+const c = L.createCampaign({ name: 'Grand opening', type: 'double-punches',
+  startsAt: '2026-10-17T00:00:00Z', endsAt: '2026-10-19T23:59:59Z' });
+if (L.campaignStatus(c, now) !== 'live') process.exit(1);
+const m = L.createMember('Wendy Weekend', { punchesPerCard: 8 });
+// Each visit stamps 1 + 1 campaign bonus punch -> reward at the 4th visit.
+let earnedAt = -1;
+for (let i = 1; i <= 6; i++) {
+  const eff = L.campaignVisitEffect([c], now);
+  const r = L.logVisit(m, now, { bonusPunches: eff.bonusPunches, bonusNote: eff.labels.join(', ') });
+  if (r.rewardEarnedNow && earnedAt === -1) earnedAt = i;
+}
+if (earnedAt !== 4) { console.error('reward at visit ' + earnedAt); process.exit(1); }
+if (!m.ledger.some(function (e) { return e.type === 'bonus' && /Grand opening/.test(e.note); })) {
+  console.error('campaign tagged in ledger'); process.exit(1);
+}
+const stats = L.campaignStats(c, [m]);
+if (stats.visits !== 6 || stats.rewards !== 1) { console.error('stats: ' + JSON.stringify(stats)); process.exit(1); }
+// After the campaign ends, visits count singly again.
+const later = L.campaignVisitEffect([c], '2026-10-25T12:00:00Z');
+if (later.bonusPunches !== 0) { console.error('expired campaign still applies'); process.exit(1); }
+NODEEOF
+pass "flow 20: double-punches campaign earns reward at 4th visit, stats tracked"
+
+# Flow 21: action bonus journey — review bonus -> ledger -> liability
+node <<'NODEEOF' || fail "flow 21: action bonus -> ledger -> liability"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const rules = L.defaultEarningRules();
+const m = L.createMember('Rita Review', { punchesPerCard: 5 });
+// 2 review bonuses (2 punches each) + 1 visit = 5 -> reward earned, none redeemed.
+L.awardActionBonus(m, 'review', rules);
+L.awardActionBonus(m, 'review', rules);
+L.logVisit(m);
+if (L.rewardsEarned(m) !== 1) { console.error('earned=' + L.rewardsEarned(m)); process.exit(1); }
+const liab = L.outstandingLiability([m], 6);
+if (liab.count !== 1 || liab.amount !== 6) { console.error('liab: ' + JSON.stringify(liab)); process.exit(1); }
+const bonuses = m.ledger.filter(function (e) { return e.type === 'bonus'; });
+if (bonuses.length !== 2 || !/shout-out/.test(bonuses[0].note)) {
+  console.error('ledger: ' + JSON.stringify(bonuses)); process.exit(1);
+}
+NODEEOF
+pass "flow 21: two review bonuses + 1 visit = 1 reward, liability \$6.00"
+
+# Flow 22: full member-profile journey — referral bonus lands in the ledger with context
+node <<'NODEEOF' || fail "flow 22: referral completion feeds the member ledger"
+const L = require('./js/logic.js');
+L._resetMemberSeq();
+const members = [];
+const r = L.autoEnrollMember(members, 'Rex Referrer', {});
+if (!r.created) process.exit(1);
+const ev = L.recordReferralEvent(r.member, 'completed', 2, 'Referral bonus — Kim completed');
+if (ev.bonus.bonusPunches !== 2 || r.member.bonusPunches !== 2) process.exit(1);
+const types = r.member.ledger.map(function (e) { return e.type; });
+if (types.join(',') !== 'signup,bonus') { console.error(types.join(',')); process.exit(1); }
+const note = r.member.ledger[1].note;
+if (note !== 'Referral bonus — Kim completed') { console.error('note: ' + note); process.exit(1); }
+NODEEOF
+pass "flow 22: referral bonus recorded in ledger with friend context"
+
 echo "---"
 echo "e2e: $PASS passed, $FAIL failed"
 exit "$FAIL"
